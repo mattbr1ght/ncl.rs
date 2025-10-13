@@ -28,22 +28,28 @@ Suma godzin: 53
 
 ## Lista zadań 
 
-- [ ] Inicjalizacja projektu CLI
-- [ ] Implementacja parsowania argumentów
-- [ ] Interaktywny kreator
+- [x] Inicjalizacja projektu CLI ✅ 2025-10-13
+- [x] Implementacja parsowania argumentów ✅ 2025-10-13
+- [x] Interaktywny kreator ✅ 2025-10-13
 - [ ] Generator struktury projektu
-- [ ] Generator minimalnego code scaffold
+- [x] Generator minimalnego code scaffold ✅ 2025-10-13
 - [ ] Szablony docker-compose dla stacków
-- [ ] System szablonów
-- [ ] Parsowanie metadanych szablonu
+- [x] System szablonów ✅ 2025-10-13
+- [ ] rozbudowa systemu szablonów
+- [x] Parsowanie metadanych szablonu ✅ 2025-10-13
 - [ ] Weryfikacja środowiska
 - [ ] Integracja z Gitem
+- [ ] Przygotowanie przykładowych szablonów
+
+- [ ] github repo organizacyjne
+- [ ] Generowanie stubu CI
 - [ ] Menedżer zadań (TODO scanner)
+- [ ] integracja z trello
+
 - [ ] Filtrowanie i otwieranie zadań
 - [ ] Integracja z GitHub/GitLab (opcjonalnie)
 - [ ] Task runner `ncl run`
-- [ ] Generowanie stubu CI
 - [ ] Testy jednostkowe
 - [ ] Refaktoryzacja i poprawki
-- [ ] Przygotowanie przykładowych szablonów
 - [ ] Pakowanie i dystrybucja binarki
+
