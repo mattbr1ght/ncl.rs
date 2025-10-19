@@ -1,11 +1,15 @@
+use serde::Serialize;
+
 use super::templates::Template;
 use super::common::Installable;
 use std::collections::HashMap;
 use std::fs;
 
+#[derive(Serialize)]
 pub struct ProjectOptions {
     pub name: String,
     pub path: std::path::PathBuf,
+    #[serde(skip_serializing)]
     pub template: Template,
 }
 
@@ -33,8 +37,14 @@ impl ProjectOptions {
 
         // install selected template
         self.template.install(&self)?;
-
+        std::fs::write(self.path.join("ncl_project_options.toml"), toml::to_string(&self).expect("Should be able to serialize ProjectOptions"))?;
+        
         // git init
+        use git2;
+        if !self.path.join(".git").exists() {
+            std::fs::create_dir_all(&self.path)?;
+            git2::Repository::init(&self.path).expect("Git repository initialization should be successful");
+        }
 
         Ok(())
     }

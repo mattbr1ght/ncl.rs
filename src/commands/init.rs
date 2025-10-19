@@ -4,7 +4,7 @@ use sanitize_filename::is_sanitized;
 use sanitize_filename::sanitize;
 
 use crate::modules::templates::Template;
-// use crate::modules::common::Installable;
+use crate::modules::check::*;
 use crate::modules::scaffold::ProjectOptions;
 
 pub fn run() -> std::io::Result<()>{
@@ -44,15 +44,13 @@ pub fn run() -> std::io::Result<()>{
     let template = project_type.interact()?;
 
     // -------------------- Dependencies -------------------- 
-    // TODO: suggest installing missing dependencies
 
     // download and install missing project depencencies
-    let missing_dependencies = &template.dependencies;
+    let missing_dependencies = missing_dependencies(&template);
 
-    // let install = false;
     if missing_dependencies.len() >= 1 {
         cliclack::note("Missing dependencies!", 
-            missing_dependencies.iter().fold("".to_string(), |acc, e| format!("{acc}{e}\n"))
+            missing_dependencies.iter().fold("".to_string(), |acc, e| format!("{acc}{} -> install: {}\n", e.name, e.install_hint))
         )?;
         // install = cliclack::confirm("Install missing dependencies?").interact()?;
     }

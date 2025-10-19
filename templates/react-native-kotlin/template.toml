@@ -1,0 +1,18 @@
+name = "React Native (Expo)"
+comment = "Base scaffold for React Native projects"
+version = "1.0.0"
+
+[[dependencies]]
+name = "node"
+check = "node --version"
+install_hint = "https://nodejs.org/en/download/"
+
+[[dependencies]]
+name = "git"
+check = "git --version"
+install_hint = "https://git-scm.com/downloads"
+
+[[dependencies]]
+name = "npm"
+check = "npm --version"
+install_hint = "Installed with node.js"

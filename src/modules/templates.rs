@@ -1,5 +1,5 @@
 use crate::modules::scaffold::ProjectOptions;
-use crate::modules::common::{Installable, ncl_config_dir};
+use crate::modules::common::{Installable, ncl_config_dir, Dependency};
 
 use serde::Deserialize;
 
@@ -27,7 +27,7 @@ pub struct Template {
     pub name: String,
     pub path: std::path::PathBuf,
     pub comment: String,
-    pub dependencies: Vec<String>,
+    pub dependencies: Vec<Dependency>,
 }
 
 
@@ -42,7 +42,7 @@ impl Template {
     }
 
     #[allow(dead_code)]
-    pub fn new(name: String, path: String, comment: String, dependencies: Vec<String>) -> Self {
+    pub fn new(name: String, path: String, comment: String, dependencies: Vec<Dependency>) -> Self {
         Self {
             name: name,
             path: std::path::PathBuf::from(path),
