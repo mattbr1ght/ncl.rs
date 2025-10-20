@@ -14,7 +14,6 @@ struct Cli {
 enum Commands {
     Init,
     Check,
-    Template,
     Run,
     Task
 }
@@ -26,7 +25,6 @@ fn main() -> std::io::Result<()> {
     let _ = match &cli.command {
         Some(Commands::Init) => commands::init::run()?,
         Some(Commands::Check) => commands::check::run()?,
-        Some(Commands::Template) => commands::template::run()?,
         Some(Commands::Run) => commands::run::run()?,
         Some(Commands::Task) => commands::task::run()?,
         None => ncl_command.print_help().expect("ncl_command should have been created"),

@@ -1,0 +1,9 @@
+services:
+    next-server:
+        build:
+            # context: './docker/next'
+            context: './'
+            # image: './docker/next'
+            dockerfile: Dockerfile
+        ports:
+            - '${APP_PORT:-3000}:3000'

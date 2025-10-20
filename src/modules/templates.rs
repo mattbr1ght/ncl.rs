@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use std::io::{Seek, Read};
 use std::path::PathBuf;
+use std::process::Command;
 use include_dir::{include_dir, Dir};
 use std::{collections::HashMap, fs::File};
 
@@ -19,6 +20,8 @@ pub fn write_default_templates(target_path: &std::path::Path) -> std::io::Result
 
 // -------------------------------------------------------------- //
 
+type Hook = Vec<String>;
+
 #[derive(Deserialize)]
 #[derive(Debug)]
 #[derive(Clone, Eq, PartialEq)]
@@ -28,6 +31,7 @@ pub struct Template {
     pub path: std::path::PathBuf,
     pub comment: String,
     pub dependencies: Vec<Dependency>,
+    pub post_install_hook: Vec<String>,
 }
 
 
@@ -38,16 +42,18 @@ impl Template {
             path: std::path::PathBuf::new(),
             comment: String::new(),
             dependencies: vec![],
+            post_install_hook: vec![],
         }
     }
 
     #[allow(dead_code)]
-    pub fn new(name: String, path: String, comment: String, dependencies: Vec<Dependency>) -> Self {
+    pub fn new(name: String, path: String, comment: String, dependencies: Vec<Dependency>, post_install_hook: Hook) -> Self {
         Self {
             name: name,
             path: std::path::PathBuf::from(path),
             comment: comment,
             dependencies: dependencies,
+            post_install_hook: post_install_hook,
         }
     }
 
@@ -78,15 +84,47 @@ impl Installable for Template {
         let vars = project_options.vars();
         replace_placeholders_recursively(&project_options.path, &vars)?;
 
+
         Ok(())
     }
+}
+
+pub fn run_hook(hook: &Hook, project_path: &std::path::Path) -> std::io::Result<()> {
+    dbg!(&hook);
+    dbg!(&project_path);
+    let previous_dir: PathBuf = std::env::current_dir()?;
+    std::env::set_current_dir(&project_path)?;
+    for command in hook {
+        let (program, args) = command.split_once(" ").expect("Non valid command in hook");
+        println!("{} -=> {} {}", project_path.to_str().unwrap(), &program, &args);
+        Command::new(program)
+            .args(args.split(" "))
+            .current_dir(project_path)
+            // .stdout(std::process::Stdio::null())
+            // .stdin(std::process::Stdio::null())
+            // .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect(format!("{} command failed", program).as_str());
+    }
+    std::env::set_current_dir(&previous_dir)?;
+
+    Ok(())
 }
 
 // -------------------------------------------------------------- //
 
 fn templates_dir() -> PathBuf {
+    // follow_symlink(ncl_config_dir().join("templates"))
     ncl_config_dir().join("templates")
 }
+
+// fn follow_symlink(mut path: PathBuf) -> PathBuf {
+//     while path.is_symlink() {
+//         path = std::fs::read_link(path)
+//             .expect("symlink should be pointing to an existing file");
+//     };
+//     path
+// }
 
 fn ensure_templates_exist() -> std::io::Result<()> {
     let dir = templates_dir();

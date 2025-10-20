@@ -1,0 +1,28 @@
+name = "Next.js (Typescript)"
+comment = "Base scaffold for Next.js projects"
+version = "1.0.0"
+
+post_install_hook = [
+    "npm install",
+    "npm run build",
+]
+
+[[dependencies]]
+name = "node"
+check = "node --version"
+install_hint = "https://nodejs.org/en/download/"
+
+[[dependencies]]
+name = "git"
+check = "git --version"
+install_hint = "https://git-scm.com/downloads"
+
+[[dependencies]]
+name = "npm"
+check = "npm --version"
+install_hint = "Installed with node.js"
+
+[[dependencies]]
+name = "docker"
+check = "docker --version"
+install_hint = "https://docs.docker.com/get-started/get-docker/"

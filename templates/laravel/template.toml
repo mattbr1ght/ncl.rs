@@ -1,0 +1,43 @@
+name = "Laravel (Vue)"
+comment = "Base scaffold for Laravel projects"
+version = "1.0.0"
+
+post_install_hook = [
+    "php artisan key:generate",
+    "php artisan storage:link",
+    "composer install",
+    "npm install",
+    "npm run build",
+    # "./vendor/bin/sail up -d",
+    # "./vendor/bin/sail artisan migrate",
+]
+
+[[dependencies]]
+name = "node"
+check = "node --version"
+install_hint = "https://nodejs.org/en/download/"
+
+[[dependencies]]
+name = "git"
+check = "git --version"
+install_hint = "https://git-scm.com/downloads"
+
+[[dependencies]]
+name = "npm"
+check = "npm --version"
+install_hint = "Installed with node.js"
+
+[[dependencies]]
+name = "php"
+check = "php --version"
+install_hint = "https://www.php.net/downloads.php"
+
+[[dependencies]]
+name = "composer"
+check = "composer --version"
+install_hint = "https://getcomposer.org/download/"
+
+[[dependencies]]
+name = "docker"
+check = "docker --version"
+install_hint = "https://docs.docker.com/get-started/get-docker/"

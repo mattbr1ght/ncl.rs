@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::modules::templates::run_hook;
+
 use super::templates::Template;
 use super::common::Installable;
 use std::collections::HashMap;
@@ -8,6 +10,7 @@ use std::fs;
 #[derive(Serialize)]
 pub struct ProjectOptions {
     pub name: String,
+    #[serde(skip_serializing)]
     pub path: std::path::PathBuf,
     #[serde(skip_serializing)]
     pub template: Template,
@@ -39,6 +42,9 @@ impl ProjectOptions {
         self.template.install(&self)?;
         std::fs::write(self.path.join("ncl_project_options.toml"), toml::to_string(&self).expect("Should be able to serialize ProjectOptions"))?;
         
+        // post install hook
+        run_hook(&self.template.post_install_hook, &self.path)?;
+
         // git init
         use git2;
         if !self.path.join(".git").exists() {
