@@ -2,6 +2,10 @@ name = "React Native (Expo)"
 comment = "Base scaffold for React Native projects"
 version = "1.0.0"
 
+# post_install_hook = [
+#     "npm install",
+# ]
+
 [[dependencies]]
 name = "node"
 check = "node --version"

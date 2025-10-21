@@ -3,10 +3,10 @@ comment = "Base scaffold for Laravel projects"
 version = "1.0.0"
 
 post_install_hook = [
-    "php artisan key:generate",
-    "php artisan storage:link",
     "composer install",
     "npm install",
+    "php artisan key:generate",
+    "php artisan storage:link",
     "npm run build",
     # "./vendor/bin/sail up -d",
     # "./vendor/bin/sail artisan migrate",

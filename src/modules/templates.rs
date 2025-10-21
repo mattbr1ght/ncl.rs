@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use std::io::{Seek, Read};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command};
 use include_dir::{include_dir, Dir};
 use std::{collections::HashMap, fs::File};
 
@@ -90,23 +90,36 @@ impl Installable for Template {
 }
 
 pub fn run_hook(hook: &Hook, project_path: &std::path::Path) -> std::io::Result<()> {
-    dbg!(&hook);
-    dbg!(&project_path);
+    if hook.is_empty() { return Ok(()); }
     let previous_dir: PathBuf = std::env::current_dir()?;
     std::env::set_current_dir(&project_path)?;
+    let multi = cliclack::multi_progress("Running post install hook:");
     for command in hook {
-        let (program, args) = command.split_once(" ").expect("Non valid command in hook");
-        println!("{} -=> {} {}", project_path.to_str().unwrap(), &program, &args);
-        Command::new(program)
-            .args(args.split(" "))
+
+        #[cfg(windows)]
+        pub const SHELL: &'static str = "cmd";
+        #[cfg(not(windows))]
+        pub const SHELL: &'static str = "sh";
+
+        let (program, _) = command.split_once(" ").unwrap_or((command, ""));
+
+        let spinner = multi.add(cliclack::spinner());
+        spinner.start(format!("◇ {}", &command));
+        let output = Command::new(SHELL)
+            .arg("-c")
+            .arg(command)
             .current_dir(project_path)
-            // .stdout(std::process::Stdio::null())
-            // .stdin(std::process::Stdio::null())
-            // .stderr(std::process::Stdio::null())
-            .spawn()
+            .output()
             .expect(format!("{} command failed", program).as_str());
+
+        if output.status.success() {
+            spinner.stop(format!("  ◆ {}", &command));
+        } else {
+            spinner.stop(format!("  △ Error: {:?} ({})", output, &command));
+        }
     }
     std::env::set_current_dir(&previous_dir)?;
+    multi.stop();
 
     Ok(())
 }

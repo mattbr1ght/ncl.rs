@@ -1,0 +1,9 @@
+services:
+    react-native-server:
+        build:
+            # context: './docker/next'
+            context: './'
+            # image: './docker/next'
+            dockerfile: Dockerfile
+        ports:
+            - '${APP_PORT:-8081}:8081'
