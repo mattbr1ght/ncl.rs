@@ -1,3 +1,4 @@
+use regex::Regex;
 use serde::Serialize;
 
 use crate::modules::templates::run_hook;
@@ -6,6 +7,8 @@ use super::templates::Template;
 use super::common::Installable;
 use std::collections::HashMap;
 use std::fs;
+
+use keyring::Entry;
 
 #[derive(Serialize)]
 pub struct ProjectOptions {
@@ -47,10 +50,67 @@ impl ProjectOptions {
 
         // git init
         use git2;
+        let mut repo: Option<git2::Repository> = None;
         if !self.path.join(".git").exists() {
             std::fs::create_dir_all(&self.path)?;
-            git2::Repository::init(&self.path).expect("Git repository initialization should be successful");
+            repo = Some(git2::Repository::init(&self.path).expect("Git repository initialization should be successful"));
         }
+
+        // create git remote repo
+        let service = "ncl-cli";
+        let user = whoami::username(); // or some fixed username
+        let entry = Entry::new(service, &user).expect("Probably safe username should not error");
+
+        let token_result = entry.get_password();
+        let token;
+
+        fn ask_for_token() -> String {
+            cliclack::input("Please provide a github access token:")
+                .required(true)
+                .validate_interactively(|input: &String| {
+                    if Regex::new(r"^ghp_[a-zA-Z0-9]{36}$").unwrap().is_match(input) {
+                        Ok(())
+                    } else {
+                        Err("Not a valid personal access token")
+                    }
+                })
+                .interact().expect("Should be fine")
+        }
+
+        match token_result {
+            Ok(t) => token = t,
+            Err(keyring::Error::NoEntry) => token = ask_for_token(),
+            Err(_) => {panic!("Ambiguous entries for the github token in keystore")},
+            // Err(keyring::Error::Ambiguous) => {}
+        }
+
+        println!("{token}");
+
+        let client = reqwest::blocking::Client::new();
+        let resp = client.post("https://api.github.com/user/repos")
+            .header("User-Agent", "NCL-CLI")
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "name": self.name,
+                "private": true
+            }))
+            .send();
+
+        match resp {
+            Ok(r) => {
+                cliclack::log::info("Succesfully created remote repository")?;
+                #[derive(serde::Deserialize)]
+                struct Resp {
+                    remote_url: String,
+                }
+                let resp: Resp = r.json().unwrap();
+                repo.unwrap().remote("origin", resp.remote_url.as_str()).expect("Could not add remote origin to repo");
+
+            },
+            Err(_) => cliclack::log::error("Request to create a remote repository failed")?,
+        }
+
+        
 
         Ok(())
     }

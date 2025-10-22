@@ -11,7 +11,7 @@ fn is_ignored(entry: &DirEntry) -> bool {
     let name = entry.file_name().to_string_lossy();
     entry.file_type().is_dir() && matches!(
         name.as_ref(),
-        "node_modules" | ".git" | "target" | ".idea" | ".vscode" | ".next" | ".data"
+        "node_modules" | ".git" | "target" | ".idea" | ".vscode" | ".next" | ".data" | "vendor"
     )
 }
 
