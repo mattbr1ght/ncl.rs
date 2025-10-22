@@ -1,10 +1,11 @@
 // use std::io::{Error, ErrorKind};
+use crate::modules::common::is_valid_project_path;
 
 use crate::modules::{check::{missing_dependencies}, templates::Template};
 
 pub fn run() -> std::io::Result<()> {
     let cwd = std::env::current_dir()?;
-    if !cwd.join("template.toml").exists() {
+    if !is_valid_project_path(&cwd) {
         cliclack::outro("You are not in a valid project directory")?;
         return Ok(());
         // return Err(

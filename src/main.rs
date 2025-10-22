@@ -12,9 +12,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Initializes a project
     Init,
+    /// Checks environment for missing dependencies of the current project
     Check,
+    /// Runs predefined scrips. Without arguments shows available scripts
     Run,
+    /// Displays TODOs in code. Similiar to `rg TODO`
     Task
 }
 

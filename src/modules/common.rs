@@ -13,6 +13,10 @@ pub fn ncl_config_dir() -> PathBuf {
         .join("ncl")
 }
 
+pub fn is_valid_project_path(path: &std::path::Path) -> bool {
+    path.join("template.toml").exists()
+}
+
 // --- //
 
 #[derive(Deserialize)]
