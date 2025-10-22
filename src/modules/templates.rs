@@ -14,6 +14,7 @@ use std::{collections::HashMap, fs::File};
 static DEFAULT_TEMPLATES: Dir = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
 pub fn write_default_templates(target_path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(target_path)?;
     DEFAULT_TEMPLATES.extract(target_path)?;
     Ok(())
 }
