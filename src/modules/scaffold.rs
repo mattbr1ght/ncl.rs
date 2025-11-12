@@ -1,14 +1,12 @@
+use anyhow::{Context, Result};
+use log::debug;
 use regex::Regex;
 use serde::Serialize;
-
-use crate::modules::templates::run_hook;
-
-use super::templates::Template;
-use super::common::Installable;
 use std::collections::HashMap;
-use std::fs;
 
-use keyring::Entry;
+use crate::modules::config::NclConfig;
+use crate::modules::templates::{run_hook, Template, load_universal_base};
+use crate::modules::common::Installable;
 
 #[derive(Serialize)]
 pub struct ProjectOptions {
@@ -17,6 +15,8 @@ pub struct ProjectOptions {
     pub path: std::path::PathBuf,
     #[serde(skip_serializing)]
     pub template: Template,
+    #[serde(skip_serializing)]
+    pub config: NclConfig,
 }
 
 impl ProjectOptions {
@@ -27,91 +27,181 @@ impl ProjectOptions {
         map
     }
 
-    pub fn initialize_project(&self) -> std::io::Result<()> {
-        if !fs::exists(&self.path)? {
-            fs::create_dir(&self.path)?;
-        }
-
-        // maybe move universal template out of templates/ folder to eliminate possible name
-        // conflicts
-        use super::templates::load_templates;
-        let base_template = load_templates()?.into_iter().find(|template| template.name == "Universal Base");
-        match base_template {
-            Some(base_template) => base_template.install(&self)?,
-            None => {}
-        };
-
-        // install selected template
-        self.template.install(&self)?;
-        std::fs::write(self.path.join("ncl_project_options.toml"), toml::to_string(&self).expect("Should be able to serialize ProjectOptions"))?;
+    pub fn initialize_project(&mut self) -> Result<()> {
+        debug!("Initializing project: {}", self.name);
         
-        // post install hook
-        run_hook(&self.template.post_install_hook, &self.path)?;
+        self.create_project_directory()?;
+        self.install_universal_base()?;
+        self.install_selected_template()?;
+        self.save_project_options()?;
+        self.run_post_install_hook()?;
+        
+        let repo = self.initialize_git_repository()?;
+        
+        if !self.config.skip_github {
+            self.setup_github_integration(repo)?;
+        } else {
+            debug!("Skipping GitHub integration");
+        }
+        
+        Ok(())
+    }
 
-        // git init
-        use git2;
-        let mut repo: Option<git2::Repository> = None;
-        if !self.path.join(".git").exists() {
-            std::fs::create_dir_all(&self.path)?;
-            repo = Some(git2::Repository::init(&self.path).expect("Git repository initialization should be successful"));
+    fn create_project_directory(&self) -> Result<()> {
+        if !self.path.exists() {
+            std::fs::create_dir_all(&self.path)
+                .with_context(|| format!("Failed to create project directory: {}", self.path.display()))?;
+        }
+        Ok(())
+    }
+
+    fn install_universal_base(&self) -> Result<()> {
+        if let Some(base_template) = load_universal_base()? {
+            debug!("Installing universal base template");
+            base_template.install(self)
+                .context("Failed to install universal base template")?;
+        } else {
+            debug!("No universal base template found");
+        }
+        Ok(())
+    }
+
+    fn install_selected_template(&self) -> Result<()> {
+        debug!("Installing template: {}", self.template.name);
+        self.template.install(self)
+            .with_context(|| format!("Failed to install template '{}'", self.template.name))
+    }
+
+    fn save_project_options(&self) -> Result<()> {
+        let toml_content = toml::to_string(self)
+            .context("Failed to serialize project options")?;
+        std::fs::write(self.path.join("ncl_project_options.toml"), toml_content)
+            .context("Failed to write project options file")?;
+        Ok(())
+    }
+
+    fn run_post_install_hook(&self) -> Result<()> {
+        let hook = self.template.get_post_install_hook();
+        if !hook.is_empty() {
+            debug!("Running post-install hook with {} commands", hook.len());
+            run_hook(hook, &self.path)
+                .context("Failed to run post-install hook")?;
+        }
+        Ok(())
+    }
+
+    fn initialize_git_repository(&self) -> Result<Option<git2::Repository>> {
+        if self.path.join(".git").exists() {
+            debug!("Git repository already exists");
+            return Ok(None);
         }
 
-        // create git remote repo
-        let service = "ncl-cli";
-        let user = whoami::username(); // or some fixed username
-        let entry = Entry::new(service, &user).expect("Probably safe username should not error");
+        debug!("Initializing git repository");
+        let repo = git2::Repository::init(&self.path)
+            .with_context(|| format!("Failed to initialize git repository at {}", self.path.display()))?;
+        
+        Ok(Some(repo))
+    }
 
-        let token_result = entry.get_password();
-        let token;
-
-        fn ask_for_token() -> String {
-            cliclack::input("Please provide a github access token:")
-                .required(true)
-                .validate_interactively(|input: &String| {
-                    if Regex::new(r"^ghp_[a-zA-Z0-9]{36}$").unwrap().is_match(input) {
-                        Ok(())
-                    } else {
-                        Err("Not a valid personal access token")
-                    }
-                })
-                .interact().expect("Should be fine")
+    fn setup_github_integration(&mut self, repo: Option<git2::Repository>) -> Result<()> {
+        debug!("Setting up GitHub integration");
+        
+        let token = self.get_github_token()?;
+        if token.is_none() || token.as_ref().unwrap().is_empty() {
+            debug!("No GitHub token available, skipping repository creation");
+            return Ok(());
         }
 
-        match token_result {
-            Ok(t) => token = t,
-            Err(keyring::Error::NoEntry) => token = ask_for_token(),
-            Err(_) => {panic!("Ambiguous entries for the github token in keystore")},
-            // Err(keyring::Error::Ambiguous) => {}
+        let token = token.unwrap();
+        self.create_remote_repository(&token, repo)
+            .context("Failed to create GitHub repository")
+    }
+
+    fn get_github_token(&mut self) -> Result<Option<String>> {
+        // Try to get from config
+        if let Ok(Some(token)) = self.config.get_github_token() {
+            if !token.is_empty() {
+                return Ok(Some(token));
+            }
         }
 
-        println!("{token}");
+        // Ask user if they want to provide a token
+        let should_ask = cliclack::confirm("Would you like to set up GitHub integration?")
+            .initial_value(true)
+            .interact()
+            .unwrap_or(false);
 
+        if !should_ask {
+            return Ok(None);
+        }
+
+        let token = ask_for_github_token();
+        if !token.is_empty() {
+            self.config.set_github_token(Some(token.clone()))?;
+            Ok(Some(token))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn create_remote_repository(
+        &self,
+        token: &str,
+        repo: Option<git2::Repository>,
+    ) -> Result<()> {
         let client = reqwest::blocking::Client::new();
-        let resp = client.post("https://api.github.com/user/repos")
+        let response = client
+            .post("https://api.github.com/user/repos")
             .header("User-Agent", "NCL-CLI")
             .bearer_auth(token)
             .json(&serde_json::json!({
                 "name": self.name,
                 "private": true
             }))
-            .send();
+            .send()
+            .context("Failed to send request to GitHub API")?;
 
-        match resp {
-            Ok(r) => {
-                cliclack::log::info("Succesfully created remote repository")?;
-                #[derive(serde::Deserialize)]
-                struct Resp {
-                    remote_url: String,
-                }
-                let resp: Resp = r.json().unwrap();
-                repo.unwrap().remote("origin", resp.remote_url.as_str()).expect("Could not add remote origin to repo");
-
-            },
-            Err(_) => cliclack::log::error("Request to create a remote repository failed")?,
+        if !response.status().is_success() {
+            let error_text = response.text().unwrap_or_default();
+            cliclack::log::error(&format!("Failed to create GitHub repository: {}", error_text))?;
+            return Ok(());
         }
 
-        
+        cliclack::log::info("Successfully created remote repository")?;
+
+        #[derive(serde::Deserialize)]
+        struct GitHubResponse {
+            clone_url: String,
+        }
+
+        let github_response: GitHubResponse = response.json()
+            .context("Failed to parse GitHub API response")?;
+
+        if let Some(repo) = repo {
+            repo.remote("origin", &github_response.clone_url)
+                .context("Failed to add remote origin to git repository")?;
+            debug!("Added GitHub remote: {}", github_response.clone_url);
+        }
 
         Ok(())
     }
+}
+
+fn ask_for_github_token() -> String {
+    cliclack::input("Please provide a GitHub access token (optional - leave empty to skip):")
+        .required(false)
+        .validate_interactively(|input: &String| {
+            if input.is_empty() {
+                Ok(())
+            } else if Regex::new(r"^ghp_[a-zA-Z0-9]{36}$")
+                .unwrap()
+                .is_match(input)
+            {
+                Ok(())
+            } else {
+                Err("Not a valid personal access token")
+            }
+        })
+        .interact()
+        .unwrap_or_default()
 }

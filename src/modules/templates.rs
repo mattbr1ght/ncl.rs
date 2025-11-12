@@ -1,195 +1,224 @@
+use anyhow::{Context, Result};
 use crate::modules::scaffold::ProjectOptions;
 use crate::modules::common::{Installable, ncl_config_dir, Dependency};
+use crate::modules::execution::execute_commands;
 
 use serde::Deserialize;
-
-use std::io::{Seek, Read};
-use std::path::PathBuf;
-use std::process::{Command};
+use std::collections::HashMap;
+use std::io::{Read, Seek};
+use std::path::{Path, PathBuf};
 use include_dir::{include_dir, Dir};
-use std::{collections::HashMap, fs::File};
-
-// ------------------ Include Templates in Bin ------------------ //
 
 static DEFAULT_TEMPLATES: Dir = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
-pub fn write_default_templates(target_path: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(target_path)?;
-    DEFAULT_TEMPLATES.extract(target_path)?;
-    Ok(())
-}
+/// A hook is a sequence of shell commands to execute
+pub type Hook = Vec<String>;
 
-// -------------------------------------------------------------- //
-
-type Hook = Vec<String>;
-
-#[derive(Deserialize)]
-#[derive(Debug)]
-#[derive(Clone, Eq, PartialEq)]
-#[serde(default = "Template::default")]
+/// Represents a project template with its configuration
+#[derive(Deserialize, Debug, Clone, Eq, PartialEq)]
+#[serde(default)]
 pub struct Template {
     pub name: String,
-    pub path: std::path::PathBuf,
+    pub path: PathBuf,
     pub comment: String,
     pub dependencies: Vec<Dependency>,
-    pub post_install_hook: Vec<String>,
+    /// Post-install hook (deprecated, use hooks instead)
+    #[serde(default)]
+    pub post_install_hook: Hook,
+    /// Named hooks for different execution contexts
+    #[serde(default)]
+    pub hooks: HashMap<String, Hook>,
+    pub jobs: Option<HashMap<String, Vec<String>>>,
 }
 
-
-impl Template {
-    pub fn default() -> Self {
+impl Default for Template {
+    fn default() -> Self {
         Self {
             name: String::new(),
-            path: std::path::PathBuf::new(),
+            path: PathBuf::new(),
             comment: String::new(),
             dependencies: vec![],
             post_install_hook: vec![],
+            hooks: HashMap::new(),
+            jobs: None,
         }
     }
-
-    #[allow(dead_code)]
-    pub fn new(name: String, path: String, comment: String, dependencies: Vec<Dependency>, post_install_hook: Hook) -> Self {
-        Self {
-            name: name,
-            path: std::path::PathBuf::from(path),
-            comment: comment,
-            dependencies: dependencies,
-            post_install_hook: post_install_hook,
-        }
-    }
-
 }
 
-pub fn load_templates() -> std::io::Result<Vec<Template>> {
-    let mut templates = Vec::new();
+impl Template {
+    /// Get the post-install hook, checking both old and new formats
+    pub fn get_post_install_hook(&self) -> &Hook {
+        // Prefer new hooks format, fallback to old post_install_hook
+        self.hooks.get("post_install")
+            .or_else(|| if !self.post_install_hook.is_empty() {
+                Some(&self.post_install_hook)
+            } else {
+                None
+            })
+            .unwrap_or(&self.post_install_hook)
+    }
 
+    /// Check if this is the universal base template
+    pub fn is_universal_base(&self) -> bool {
+        self.name == "Universal Base"
+    }
+}
+
+/// Loads all available templates from the templates directory (excluding universal base)
+pub fn load_templates() -> Result<Vec<Template>> {
     ensure_templates_exist()?;
 
-    for entry in std::fs::read_dir(templates_dir())? {
-        let path = entry?.path();
-        if path.is_dir() && path.join("template.toml").exists() {
-            let meta = std::fs::read_to_string(path.join("template.toml"))?;
-            let mut template: Template = toml::from_str(&meta).expect("Toml deserialization error");
-            template.path = path;
-            templates.push(template);
-        }
-    }
+    let templates: Vec<Template> = std::fs::read_dir(templates_dir())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("template.toml").exists())
+        .filter_map(|path| load_template_from_path(&path).ok())
+        .filter(|template| !template.is_universal_base())
+        .collect();
+    
     Ok(templates)
+}
+
+/// Loads the universal base template
+pub fn load_universal_base() -> Result<Option<Template>> {
+    ensure_templates_exist()?;
+
+    let template = std::fs::read_dir(templates_dir())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir() && path.join("template.toml").exists())
+        .filter_map(|path| load_template_from_path(&path).ok())
+        .find(|template| template.is_universal_base());
+    
+    Ok(template)
+}
+
+fn load_template_from_path(path: &Path) -> Result<Template> {
+    let meta = std::fs::read_to_string(path.join("template.toml"))
+        .with_context(|| format!("Failed to read template.toml at {}", path.display()))?;
+    
+    let mut template: Template = toml::from_str(&meta)
+        .with_context(|| format!("Failed to parse template.toml at {}", path.display()))?;
+    template.path = path.to_path_buf();
+    Ok(template)
 }
 
 
 impl Installable for Template {
-    fn install(&self, project_options: &ProjectOptions) -> std::io::Result<()> {
-        copy_dir_recursive(&self.path, &project_options.path)?;
+    fn install(&self, project_options: &ProjectOptions) -> Result<()> {
+        copy_dir_recursive(&self.path, &project_options.path)
+            .with_context(|| format!("Failed to copy template '{}'", self.name))?;
 
         let vars = project_options.vars();
-        replace_placeholders_recursively(&project_options.path, &vars)?;
-
+        replace_placeholders_recursively(&project_options.path, &vars)
+            .context("Failed to replace placeholders in template files")?;
 
         Ok(())
     }
 }
 
-pub fn run_hook(hook: &Hook, project_path: &std::path::Path) -> std::io::Result<()> {
-    if hook.is_empty() { return Ok(()); }
-    let previous_dir: PathBuf = std::env::current_dir()?;
-    std::env::set_current_dir(&project_path)?;
-    let multi = cliclack::multi_progress("Running post install hook:");
-    for command in hook {
-
-        #[cfg(windows)]
-        pub const SHELL: &'static str = "cmd";
-        #[cfg(not(windows))]
-        pub const SHELL: &'static str = "sh";
-
-        let (program, _) = command.split_once(" ").unwrap_or((command, ""));
-
-        let spinner = multi.add(cliclack::spinner());
-        spinner.start(format!("◇ {}", &command));
-        let output = Command::new(SHELL)
-            .arg("-c")
-            .arg(command)
-            .current_dir(project_path)
-            .output()
-            .expect(format!("{} command failed", program).as_str());
-
-        if output.status.success() {
-            spinner.stop(format!("  ◆ {}", &command));
-        } else {
-            spinner.stop(format!("  △ Error: {:?} ({})", output, &command));
-        }
-    }
-    std::env::set_current_dir(&previous_dir)?;
-    multi.stop();
-
-    Ok(())
+/// Executes a hook (sequence of commands) in the project directory
+pub fn run_hook(hook: &Hook, project_path: &Path) -> Result<()> {
+    execute_commands(hook, project_path, "Running hook")
 }
 
-// -------------------------------------------------------------- //
+/// Executes a named hook from a template
+pub fn run_named_hook(template: &Template, hook_name: &str, project_path: &Path) -> Result<()> {
+    let hook = template.hooks.get(hook_name)
+        .with_context(|| format!("Hook '{}' not found in template '{}'", hook_name, template.name))?;
+    
+    execute_commands(hook, project_path, &format!("Running hook: {}", hook_name))
+}
 
 fn templates_dir() -> PathBuf {
-    // follow_symlink(ncl_config_dir().join("templates"))
     ncl_config_dir().join("templates")
 }
 
-// fn follow_symlink(mut path: PathBuf) -> PathBuf {
-//     while path.is_symlink() {
-//         path = std::fs::read_link(path)
-//             .expect("symlink should be pointing to an existing file");
-//     };
-//     path
-// }
-
-fn ensure_templates_exist() -> std::io::Result<()> {
+fn ensure_templates_exist() -> Result<()> {
     let dir = templates_dir();
-
     if !dir.exists() {
         write_default_templates(&dir)?;
     }
-
     Ok(())
 }
 
-fn copy_dir_recursive(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Path>) -> std::io::Result<()> {
-    std::fs::create_dir_all(&dst)?;
-    for entry in std::fs::read_dir(src)? {
+/// Writes default templates to the target path
+pub fn write_default_templates(target_path: &Path) -> Result<()> {
+    std::fs::create_dir_all(target_path)
+        .with_context(|| format!("Failed to create templates directory: {}", target_path.display()))?;
+    DEFAULT_TEMPLATES.extract(target_path)
+        .with_context(|| format!("Failed to extract default templates to {}", target_path.display()))?;
+    Ok(())
+}
+
+fn copy_dir_recursive(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> Result<()> {
+    let src_path = src.as_ref();
+    let dst_path = dst.as_ref();
+    
+    std::fs::create_dir_all(dst_path)
+        .with_context(|| format!("Failed to create directory: {}", dst_path.display()))?;
+    
+    for entry in std::fs::read_dir(src_path)
+        .with_context(|| format!("Failed to read directory: {}", src_path.display()))? {
         let entry = entry?;
-        let ty = entry.file_type()?;
-        if ty.is_dir() {
-            copy_dir_recursive(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        let dst_path = dst_path.join(entry.file_name());
+        
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(entry.path(), dst_path)?;
         } else {
-            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+            std::fs::copy(entry.path(), &dst_path)
+                .with_context(|| format!("Failed to copy file to: {}", dst_path.display()))?;
         }
     }
+    
     Ok(())
 }
 
-fn replace_placeholders_recursively(root: &std::path::Path, vars: &HashMap<&str, &str>) -> std::io::Result<()> {
-    for entry in walkdir::WalkDir::new(root).into_iter().filter_map(Result::ok) {
-        let path = entry.path();
-        if path.is_file() && is_text_file(path) {
-            let mut text = std::fs::read_to_string(path)?;
-            for (key, val) in vars {
-                let pattern = format!("{{{{{}}}}}", key);
-                text = text.replace(&pattern, val);
-            }
-            std::fs::write(path, text)?;
-        }
+fn replace_placeholders_recursively(root: &Path, vars: &HashMap<&str, &str>) -> Result<()> {
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().to_path_buf())
+        .filter(|path| path.is_file() && is_text_file(path))
+        .try_for_each(|path| replace_placeholders_in_file(&path, vars))
+        .context("Failed to replace placeholders in files")
+}
+
+fn replace_placeholders_in_file(path: &Path, vars: &HashMap<&str, &str>) -> Result<()> {
+    let mut text = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    
+    for (key, val) in vars {
+        let pattern = format!("{{{{{}}}}}", key);
+        text = text.replace(&pattern, val);
     }
+    
+    std::fs::write(path, text)
+        .with_context(|| format!("Failed to write file: {}", path.display()))?;
     Ok(())
 }
 
-fn is_text_file(path: &std::path::Path) -> bool {
-    let start = 0;
-    let count;
-    let mut f = File::open(path).expect("Should be a valid file path");
-    if f.metadata().expect("Should be a valid file to read").len() >= 8000{
-        count = 8000;
-    } else {
-        count = f.metadata().expect("Should be a valid file to read").len();
+fn is_text_file(path: &Path) -> bool {
+    use std::fs::File;
+    
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    
+    let Ok(metadata) = file.metadata() else {
+        return false;
+    };
+    
+    let sample_size = metadata.len().min(8000) as usize;
+    let mut buf = vec![0; sample_size];
+    
+    if file.seek(std::io::SeekFrom::Start(0)).is_err() {
+        return false;
     }
-    f.seek(std::io::SeekFrom::Start(start)).expect("Should succesfully seek the file");
-    let mut buf = vec![0; count as usize];
-    f.read_exact(&mut buf).expect("Should sucessfully read {count} bytes from file");
+    
+    if file.read_exact(&mut buf).is_err() {
+        return false;
+    }
+    
     !buf.contains(&0)
 }

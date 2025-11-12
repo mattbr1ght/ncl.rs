@@ -8,8 +8,8 @@ post_install_hook = [
     "php artisan key:generate",
     "php artisan storage:link",
     "npm run build",
-    # "./vendor/bin/sail up -d",
-    # "./vendor/bin/sail artisan migrate",
+    "sudo ./vendor/bin/sail up -d",
+    "sudo ./vendor/bin/sail artisan migrate",
 ]
 
 [[dependencies]]
