@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use log::debug;
 use crate::modules::scaffold::ProjectOptions;
 use crate::modules::common::{Installable, ncl_config_dir, Dependency};
 use crate::modules::execution::execute_commands;
@@ -79,18 +80,49 @@ pub fn load_templates() -> Result<Vec<Template>> {
     Ok(templates)
 }
 
-/// Loads the universal base template
+/// Loads the universal base template from its separate directory
 pub fn load_universal_base() -> Result<Option<Template>> {
-    ensure_templates_exist()?;
-
-    let template = std::fs::read_dir(templates_dir())?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir() && path.join("template.toml").exists())
-        .filter_map(|path| load_template_from_path(&path).ok())
-        .find(|template| template.is_universal_base());
+    let universal_path = universal_base_dir();
     
-    Ok(template)
+    if !universal_path.exists() {
+        // Try to extract it from default templates
+        ensure_universal_base_exists()?;
+    }
+    
+    if !universal_path.join("template.toml").exists() {
+        return Ok(None);
+    }
+    
+    load_template_from_path(&universal_path)
+        .map(Some)
+        .or_else(|e| {
+            debug!("Failed to load universal base: {}", e);
+            Ok(None)
+        })
+}
+
+fn ensure_universal_base_exists() -> Result<()> {
+    let universal_path = universal_base_dir();
+    
+    if universal_path.exists() && universal_path.join("template.toml").exists() {
+        return Ok(());
+    }
+    
+    // Extract universal base from default templates
+    let templates_path = templates_dir();
+    ensure_templates_exist()?;
+    
+    // Look for universal-base in the templates directory and copy it
+    let source_path = templates_path.join("universal-base");
+    if source_path.exists() && source_path.join("template.toml").exists() {
+        std::fs::create_dir_all(&universal_path)
+            .with_context(|| format!("Failed to create universal-base directory: {}", universal_path.display()))?;
+        
+        copy_dir_recursive(&source_path, &universal_path)
+            .with_context(|| "Failed to copy universal-base template")?;
+    }
+    
+    Ok(())
 }
 
 fn load_template_from_path(path: &Path) -> Result<Template> {
@@ -134,6 +166,11 @@ fn templates_dir() -> PathBuf {
     ncl_config_dir().join("templates")
 }
 
+/// Returns the path to the universal base template directory (separate from templates)
+pub fn universal_base_dir() -> PathBuf {
+    ncl_config_dir().join("universal-base")
+}
+
 fn ensure_templates_exist() -> Result<()> {
     let dir = templates_dir();
     if !dir.exists() {
@@ -148,6 +185,26 @@ pub fn write_default_templates(target_path: &Path) -> Result<()> {
         .with_context(|| format!("Failed to create templates directory: {}", target_path.display()))?;
     DEFAULT_TEMPLATES.extract(target_path)
         .with_context(|| format!("Failed to extract default templates to {}", target_path.display()))?;
+    
+    // After extracting, move universal-base to its separate directory
+    let universal_source = target_path.join("universal-base");
+    if universal_source.exists() {
+        let universal_dest = universal_base_dir();
+        std::fs::create_dir_all(universal_dest.parent().unwrap())?;
+        
+        // Copy universal-base to separate location
+        if !universal_dest.exists() {
+            copy_dir_recursive(&universal_source, &universal_dest)
+                .context("Failed to copy universal-base to separate directory")?;
+        }
+        
+        // Remove universal-base from templates directory
+        if universal_source.exists() {
+            std::fs::remove_dir_all(&universal_source)
+                .context("Failed to remove universal-base from templates directory")?;
+        }
+    }
+    
     Ok(())
 }
 

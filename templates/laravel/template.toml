@@ -4,12 +4,12 @@ version = "1.0.0"
 
 post_install_hook = [
     "composer install",
-    "npm install",
-    "php artisan key:generate",
-    "php artisan storage:link",
-    "npm run build",
-    "sudo ./vendor/bin/sail up -d",
-    "sudo ./vendor/bin/sail artisan migrate",
+    "./vendor/bin/sail up -d",
+    "docker:laravel.test:npm install",
+    "docker:laravel.test:php artisan key:generate",
+    "docker:laravel.test:php artisan storage:link",
+    "docker:laravel.test:npm run build",
+    "./vendor/bin/sail artisan migrate",
 ]
 
 [[dependencies]]

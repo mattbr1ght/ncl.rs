@@ -57,15 +57,9 @@ fn execute_host_command(cmd: &str, working_directory: &Path) -> Result<Output> {
         .with_context(|| format!("Failed to execute command: {}", cmd))
 }
 
-fn execute_docker_command(
-    cmd: &str,
-    project_path: &Path,
-    container: &str,
-    service: Option<&str>,
-) -> Result<Output> {
-    // Check if docker-compose file exists
+fn find_compose_file(project_path: &Path) -> Option<std::path::PathBuf> {
     let compose_file = project_path.join("compose.yaml");
-    let compose_file = if compose_file.exists() {
+    if compose_file.exists() {
         Some(compose_file)
     } else {
         let alt = project_path.join("docker-compose.yml");
@@ -74,19 +68,105 @@ fn execute_docker_command(
         } else {
             None
         }
-    };
+    }
+}
 
+fn get_compose_command() -> Result<&'static str> {
+    if which::which("docker").is_ok() {
+        Ok("docker")
+    } else if which::which("docker-compose").is_ok() {
+        Ok("docker-compose")
+    } else {
+        Err(anyhow::anyhow!("Neither 'docker' nor 'docker-compose' found"))
+    }
+}
+
+/// Check if user has docker permissions (can access docker socket)
+fn check_docker_permissions() -> Result<()> {
+    let output = Command::new("docker")
+        .arg("ps")
+        .output();
+    
+    match output {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(_) => {
+            Err(anyhow::anyhow!(
+                "Docker permission denied. Please add your user to the docker group:\n  sudo usermod -aG docker $USER\nThen log out and log back in, or run: newgrp docker"
+            ))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(anyhow::anyhow!(
+                "Docker permission denied. Please add your user to the docker group:\n  sudo usermod -aG docker $USER\nThen log out and log back in, or run: newgrp docker"
+            ))
+        }
+        Err(e) => Err(anyhow::anyhow!("Failed to check docker permissions: {}", e))
+    }
+}
+
+fn ensure_service_running(
+    compose_path: &Path,
+    service_name: &str,
+    project_path: &Path,
+) -> Result<()> {
+    let compose_cmd = get_compose_command()?;
+    
+    // Check if service is running
+    let mut check_cmd = Command::new(compose_cmd);
+    if compose_cmd == "docker" {
+        check_cmd.arg("compose");
+    }
+    check_cmd
+        .arg("-f")
+        .arg(compose_path)
+        .arg("ps")
+        .arg("-q")
+        .arg(service_name)
+        .current_dir(project_path);
+    
+    let check_output = check_cmd.output()
+        .with_context(|| "Failed to check if service is running. Make sure you have docker permissions.")?;
+    
+    // If service is not running, start it
+    if check_output.stdout.is_empty() {
+        debug!("Service '{}' is not running, starting it...", service_name);
+        let mut start_cmd = Command::new(compose_cmd);
+        if compose_cmd == "docker" {
+            start_cmd.arg("compose");
+        }
+        start_cmd
+            .arg("-f")
+            .arg(compose_path)
+            .arg("up")
+            .arg("-d")
+            .arg(service_name)
+            .current_dir(project_path)
+            .output()
+            .with_context(|| format!("Failed to start service '{}'. Make sure you have docker permissions.", service_name))?;
+        
+        // Wait a bit for the service to be ready
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+    
+    Ok(())
+}
+
+fn execute_docker_command(
+    cmd: &str,
+    project_path: &Path,
+    container: &str,
+    service: Option<&str>,
+) -> Result<Output> {
+    // Check docker permissions first, before any docker operations
+    check_docker_permissions()?;
+    
+    let compose_file = find_compose_file(project_path);
+    
     // Use docker-compose exec if service is specified and compose file exists
     if let (Some(service_name), Some(compose_path)) = (service, compose_file) {
-        // Try docker compose (newer) first, fallback to docker-compose
-        let compose_cmd = if which::which("docker").is_ok() {
-            "docker"
-        } else if which::which("docker-compose").is_ok() {
-            "docker-compose"
-        } else {
-            return Err(anyhow::anyhow!("Neither 'docker' nor 'docker-compose' found"));
-        };
-
+        // Ensure the service is running before executing commands
+        ensure_service_running(&compose_path, service_name, project_path)?;
+        
+        let compose_cmd = get_compose_command()?;
         let mut command = Command::new(compose_cmd);
         if compose_cmd == "docker" {
             command.arg("compose");
@@ -105,7 +185,7 @@ fn execute_docker_command(
             .output()
             .with_context(|| {
                 format!(
-                    "Failed to execute command in docker-compose service '{}': {}",
+                    "Failed to execute command in docker-compose service '{}': {}\nNote: Make sure the service is running and the command is valid.",
                     service_name, cmd
                 )
             })
@@ -129,17 +209,31 @@ fn execute_docker_command(
 }
 
 /// Parse a command string into a CommandSpec
-/// Supports syntax: "command" or "docker:service:command" or "docker:container:command"
+/// Supports syntax: 
+/// - "command" - runs on host
+/// - "docker:service:command" - runs in docker-compose service
+/// - Commands containing "sail" or docker-compose management are forced to host
 pub fn parse_command(cmd: &str) -> CommandSpec {
+    // Commands that manage docker-compose (like sail) should run on host
+    let is_docker_management = cmd.contains("sail") 
+        || cmd.contains("docker-compose") 
+        || cmd.contains("docker compose");
+    
+    if is_docker_management {
+        return CommandSpec {
+            command: cmd.to_string(),
+            context: ExecutionContext::Host,
+            working_dir: None,
+        };
+    }
+    
     if let Some(stripped) = cmd.strip_prefix("docker:") {
         if let Some((target, command)) = stripped.split_once(':') {
-            // Check if target looks like a service name (lowercase, hyphens) or container name
-            // For now, we'll treat it as a service name if docker-compose is available
             CommandSpec {
                 command: command.to_string(),
                 context: ExecutionContext::Docker {
                     container: target.to_string(),
-                    service: Some(target.to_string()), // Assume it's a service name
+                    service: Some(target.to_string()),
                 },
                 working_dir: None,
             }
@@ -199,8 +293,17 @@ fn execute_commands_internal(
             Ok(output) if output.status.success() => {
                 spinner.stop(format!("  ◆ {}", cmd_str));
             }
-            Ok(_) => {
-                let error_msg = format!("Command failed: {}", cmd_str);
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let error_details = if !stderr.is_empty() {
+                    format!(": {}", stderr.trim())
+                } else if !stdout.is_empty() {
+                    format!(": {}", stdout.trim())
+                } else {
+                    String::new()
+                };
+                let error_msg = format!("Command failed: {}{}", cmd_str, error_details);
                 spinner.stop(format!("  △ {}", error_msg));
                 errors.push(error_msg);
             }
