@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::modules::config::NclConfig;
 use crate::modules::templates::{run_hook, Template, load_universal_base};
 use crate::modules::common::Installable;
+use crate::modules::permissions::fix_file_ownership;
 
 #[derive(Serialize)]
 pub struct ProjectOptions {
@@ -34,7 +35,20 @@ impl ProjectOptions {
         self.install_universal_base()?;
         self.install_selected_template()?;
         self.save_project_options()?;
+        
+        // Fix ownership after template installation (before hooks)
+        fix_file_ownership(&self.path)
+            .context("Failed to fix file ownership after template installation")?;
+        
         self.run_post_install_hook()?;
+        
+        // Fix ownership again after hooks (Docker might create root-owned files)
+        // This is best-effort - if files are root-owned, user may need to run chown manually
+        if let Err(e) = fix_file_ownership(&self.path) {
+            debug!("Could not fix all file ownership: {}", e);
+            cliclack::log::warning("Some files may be root-owned. If you encounter permission issues, run:")?;
+            cliclack::log::warning(&format!("  sudo chown -R $USER:$USER {}", self.path.display()))?;
+        }
         
         let repo = self.initialize_git_repository()?;
         

@@ -81,7 +81,22 @@ fn get_compose_command() -> Result<&'static str> {
     }
 }
 
+/// Check if Docker Desktop is being used (works without sudo on all platforms)
+fn is_docker_desktop() -> bool {
+    // Docker Desktop sets DOCKER_HOST or uses a different context
+    std::env::var("DOCKER_HOST").is_ok() 
+        || Command::new("docker")
+            .arg("context")
+            .arg("show")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.contains("desktop") || s.contains("Docker Desktop"))
+            .unwrap_or(false)
+}
+
 /// Check if user has docker permissions (can access docker socket)
+/// Cross-platform: Works on macOS/Windows with Docker Desktop, Linux needs docker group
 fn check_docker_permissions() -> Result<()> {
     let output = Command::new("docker")
         .arg("ps")
@@ -89,17 +104,47 @@ fn check_docker_permissions() -> Result<()> {
     
     match output {
         Ok(output) if output.status.success() => Ok(()),
-        Ok(_) => {
-            Err(anyhow::anyhow!(
-                "Docker permission denied. Please add your user to the docker group:\n  sudo usermod -aG docker $USER\nThen log out and log back in, or run: newgrp docker"
-            ))
+        Ok(_) | Err(_) => {
+            // Check if we're on Linux with traditional Docker (not Docker Desktop)
+            #[cfg(target_os = "linux")]
+            {
+                if !is_docker_desktop() {
+                    return Err(anyhow::anyhow!(
+                        "Docker permission denied on Linux.\n\n\
+                        Options (no additional dependencies needed):\n\n\
+                        1. Use Docker Desktop for Linux (works without sudo):\n\
+                           Download: https://www.docker.com/products/docker-desktop/\n\
+                           Docker Desktop works without sudo on all platforms.\n\n\
+                        2. Add user to docker group (one-time, requires sudo):\n\
+                           sudo usermod -aG docker $USER\n\
+                           Then: newgrp docker (or log out/in)\n\n\
+                        3. On macOS/Windows: Docker Desktop should work automatically.\n\
+                           If not, ensure Docker Desktop is running."
+                    ));
+                }
+            }
+            
+            // macOS/Windows or Docker Desktop - provide generic error
+            #[cfg(not(target_os = "linux"))]
+            {
+                return Err(anyhow::anyhow!(
+                    "Docker is not accessible. Please ensure:\n\
+                    1. Docker Desktop is installed and running\n\
+                    2. Docker Desktop is started (check system tray/menu bar)\n\
+                    3. Try: docker ps (to verify Docker is working)"
+                ));
+            }
+            
+            // Linux with Docker Desktop - should work but didn't
+            #[cfg(target_os = "linux")]
+            {
+                Err(anyhow::anyhow!(
+                    "Docker permission denied. If using Docker Desktop, ensure it's running.\n\
+                    Otherwise, add user to docker group:\n\
+                    sudo usermod -aG docker $USER && newgrp docker"
+                ))
+            }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            Err(anyhow::anyhow!(
-                "Docker permission denied. Please add your user to the docker group:\n  sudo usermod -aG docker $USER\nThen log out and log back in, or run: newgrp docker"
-            ))
-        }
-        Err(e) => Err(anyhow::anyhow!("Failed to check docker permissions: {}", e))
     }
 }
 
@@ -150,6 +195,21 @@ fn ensure_service_running(
     Ok(())
 }
 
+/// Get current user ID for Docker user mapping (prevents root-owned files)
+#[cfg(unix)]
+fn get_docker_user_flag() -> Option<String> {
+    if let Ok(uid_output) = Command::new("id").arg("-u").output() {
+        if let Ok(uid) = String::from_utf8(uid_output.stdout) {
+            if let Ok(gid_output) = Command::new("id").arg("-g").output() {
+                if let Ok(gid) = String::from_utf8(gid_output.stdout) {
+                    return Some(format!("{}:{}", uid.trim(), gid.trim()));
+                }
+            }
+        }
+    }
+    None
+}
+
 fn execute_docker_command(
     cmd: &str,
     project_path: &Path,
@@ -175,7 +235,17 @@ fn execute_docker_command(
         command
             .arg("-f")
             .arg(compose_path)
-            .arg("exec")
+            .arg("exec");
+        
+        // Try to run as current user to avoid root-owned files
+        #[cfg(unix)]
+        {
+            if let Some(user_flag) = get_docker_user_flag() {
+                command.arg("--user").arg(&user_flag);
+            }
+        }
+        
+        command
             .arg("-T") // Disable TTY allocation
             .arg(service_name)
             .arg("sh")
@@ -191,8 +261,18 @@ fn execute_docker_command(
             })
     } else {
         // docker exec container_name sh -c "command"
-        Command::new("docker")
-            .arg("exec")
+        let mut command = Command::new("docker");
+        command.arg("exec");
+        
+        // Try to run as current user to avoid root-owned files
+        #[cfg(unix)]
+        {
+            if let Some(user_flag) = get_docker_user_flag() {
+                command.arg("--user").arg(&user_flag);
+            }
+        }
+        
+        command
             .arg(container)
             .arg("sh")
             .arg("-c")
