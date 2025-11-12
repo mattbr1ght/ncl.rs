@@ -1,4 +1,6 @@
+use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
+use simplelog::{ColorChoice, Config, LevelFilter, TermLogger, TerminalMode};
 
 mod commands;
 mod modules;
@@ -8,6 +10,9 @@ mod modules;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+    /// Enable verbose logging
+    #[arg(short, long, global = true)]
+    verbose: bool,
 }
 
 #[derive(Subcommand)]
@@ -16,23 +21,44 @@ enum Commands {
     Init,
     /// Checks environment for missing dependencies of the current project
     Check,
-    /// Runs predefined scrips. Without arguments shows available scripts
-    Run,
-    /// Displays TODOs in code. Similiar to `rg TODO`
-    Task
+    /// Runs predefined scripts. Without arguments shows available scripts
+    Run {
+        /// Name of the job to run (optional)
+        job: Option<String>,
+    },
+    /// Displays TODOs in code. Similar to `rg TODO`
+    Task,
 }
 
-fn main() -> std::io::Result<()> {
-    let cli = Cli::parse();
-    let mut ncl_command = <Cli as CommandFactory>::command();
-
-    let _ = match &cli.command {
-        Some(Commands::Init) => commands::init::run()?,
-        Some(Commands::Check) => commands::check::run()?,
-        Some(Commands::Run) => commands::run::run()?,
-        Some(Commands::Task) => commands::task::run()?,
-        None => ncl_command.print_help().expect("ncl_command should have been created"),
+fn init_logging(verbose: bool) {
+    let level = if verbose {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
     };
 
-    Ok(())
+    let _ = TermLogger::init(
+        level,
+        Config::default(),
+        TerminalMode::Mixed,
+        ColorChoice::Auto,
+    );
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    
+    init_logging(cli.verbose);
+
+    match &cli.command {
+        Some(Commands::Init) => commands::init::run(),
+        Some(Commands::Check) => commands::check::run(),
+        Some(Commands::Run { job }) => commands::run::run(job.clone()),
+        Some(Commands::Task) => commands::task::run(),
+        None => {
+            let mut cmd = <Cli as CommandFactory>::command();
+            cmd.print_help()
+                .map_err(|e| anyhow::anyhow!("Failed to print help: {}", e))
+        }
+    }
 }

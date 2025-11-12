@@ -1,80 +1,105 @@
-use std::fs;
+use anyhow::{Context, Result};
 use console::style;
-use sanitize_filename::is_sanitized;
-use sanitize_filename::sanitize;
+use log::debug;
+use sanitize_filename::{is_sanitized, sanitize};
 
-use crate::modules::templates::Template;
-use crate::modules::check::*;
+use crate::modules::check::missing_dependencies;
+use crate::modules::config::NclConfig;
 use crate::modules::scaffold::ProjectOptions;
+use crate::modules::templates::{load_templates, Template};
 
-pub fn run() -> std::io::Result<()>{
-
-    cliclack::clear_screen()?;
-    cliclack::intro(style(" init ").on_green().black())?;
-
-    // -------------------- Name and Path -------------------- 
+fn prompt_project_name() -> Result<String> {
     let cwd = std::env::current_dir()?;
-    let project_name: String =  cliclack::input("Name your project:")
+    
+    cliclack::input("Name your project:")
         .placeholder("awesome-project")
         .validate(move |input: &String| {
             if input.is_empty() {
                 Err("Please enter a name.")
             } else if !is_sanitized(input) {
                 Err("Please enter a valid name.")
-            } else if fs::exists(std::env::current_dir().unwrap().join(input)).unwrap() && fs::read_dir(std::env::current_dir().unwrap().join(input)).unwrap().count() >= 1 {
-                Err("Directory is non-empty.")
             } else {
-                Ok(())
+                let project_path = cwd.join(input);
+                if project_path.exists() && std::fs::read_dir(&project_path)
+                    .map(|dir| dir.count() > 0)
+                    .unwrap_or(false)
+                {
+                    Err("Directory is non-empty.")
+                } else {
+                    Ok(())
+                }
             }
         })
-        .interact()?;
+        .interact()
+        .map_err(|e| anyhow::anyhow!("Input error: {}", e))
+}
 
+fn prompt_template_selection() -> Result<Template> {
+    let templates = load_templates()
+        .context("Failed to load templates")?;
 
-    // -------------------- Template -------------------- 
-    let mut project_type = cliclack::select(format!("Pick a project type:"));
-
-    let templates: Vec<Template> = crate::modules::templates::load_templates()?.into_iter().filter(|t| t.name != "Universal Base").collect();
-
-    for template in templates {
-        let name = template.name.clone();
-        let comment = format!("{} - {}", template.comment.clone(), template.path.to_str().expect("Template should have a path"));
-        project_type = project_type.item(template, name, comment);
-    }
-        
-    let template = project_type.interact()?;
-
-    // -------------------- Dependencies -------------------- 
-
-    // download and install missing project depencencies
-    let missing_dependencies = missing_dependencies(&template);
-
-    if missing_dependencies.len() >= 1 {
-        cliclack::note("Missing dependencies!", 
-            missing_dependencies.iter().fold("".to_string(), |acc, e| format!("{acc}{} -> install: {}\n", e.name, e.install_hint))
-        )?;
-        // install = cliclack::confirm("Install missing dependencies?").interact()?;
+    if templates.is_empty() {
+        return Err(anyhow::anyhow!("No templates available. Please ensure templates are installed."));
     }
 
+    let mut selector = cliclack::select("Pick a project type:");
     
-    // ------------------------------------------------------ 
+    for template in &templates {
+        let comment = format!(
+            "{} - {}",
+            template.comment,
+            template.path.to_str().unwrap_or("unknown path")
+        );
+        selector = selector.item(template.clone(), template.name.clone(), comment);
+    }
+    
+    selector.interact()
+        .map_err(|e| anyhow::anyhow!("Selection error: {}", e))
+}
 
-    let project_options = ProjectOptions {
+fn format_missing_dependencies(deps: &[crate::modules::common::Dependency]) -> String {
+    deps.iter()
+        .map(|dep| format!("{} -> install: {}", dep.name, dep.install_hint))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn display_missing_dependencies(template: &Template) -> Result<()> {
+    let missing = missing_dependencies(template);
+    if !missing.is_empty() {
+        cliclack::note("Missing dependencies!", &format_missing_dependencies(&missing))?;
+    }
+    Ok(())
+}
+
+pub fn run() -> Result<()> {
+    debug!("Starting project initialization");
+    
+    cliclack::clear_screen()?;
+    cliclack::intro(style(" init ").on_green().black())?;
+
+    let config = NclConfig::load()
+        .context("Failed to load NCL configuration")?;
+    
+    let cwd = std::env::current_dir()?;
+    let project_name = prompt_project_name()?;
+    let template = prompt_template_selection()?;
+    
+    display_missing_dependencies(&template)?;
+
+    let mut project_options = ProjectOptions {
         name: project_name.clone(),
-        path: cwd.join(project_name),
-        template: template,
+        path: cwd.join(&project_name),
+        template,
+        config,
     };
 
-    project_options.initialize_project()?;
+    project_options.initialize_project()
+        .context("Failed to initialize project")?;
 
-    // ------------------------------------------------------ 
-
-    let next_steps = format!(
-        "cd ./{path}\nncl run dev",
-        path = sanitize(&project_options.name)
-    );
-
+    let next_steps = format!("cd ./{}\nncl run dev", sanitize(&project_options.name));
     cliclack::note("Next steps.", next_steps)?;
-    cliclack::outro("Sucessfully initialized the project!")?;
+    cliclack::outro("Successfully initialized the project!")?;
 
     Ok(())
 }
