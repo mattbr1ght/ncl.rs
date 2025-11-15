@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use console::style;
 use log::debug;
 use sanitize_filename::{is_sanitized, sanitize};
@@ -67,7 +67,8 @@ fn format_missing_dependencies(deps: &[crate::modules::common::Dependency]) -> S
 fn display_missing_dependencies(template: &Template) -> Result<()> {
     let missing = missing_dependencies(template);
     if !missing.is_empty() {
-        cliclack::note("Missing dependencies!", &format_missing_dependencies(&missing))?;
+        cliclack::outro_note("Missing dependencies!", &format_missing_dependencies(&missing))?;
+        return Err(anyhow!("Missing dependencies error: Can't run the project without dependencies"));
     }
     Ok(())
 }
