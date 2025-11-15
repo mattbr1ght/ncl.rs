@@ -1,9 +1,10 @@
 name = "React Native (Expo)"
 comment = "Base scaffold for React Native projects"
-version = "1.0.0"
+version = "1.1.0"
 
 post_install_hook = [
-    "docker compose up -d --build",
+    "docker compose up -d",
+    "docker compose down",
 ]
 
 [hooks]
@@ -11,16 +12,11 @@ dev = ["docker compose up -d"]
 stop = ["docker compose down"]
 
 [[dependencies]]
-name = "node"
-check = "node --version"
-install_hint = "https://nodejs.org/en/download/"
+name = "docker"
+check = "docker --version"
+install_hint = "https://docs.docker.com/get-started/get-docker/"
 
 [[dependencies]]
 name = "git"
 check = "git --version"
 install_hint = "https://git-scm.com/downloads"
-
-[[dependencies]]
-name = "npm"
-check = "npm --version"
-install_hint = "Installed with node.js"

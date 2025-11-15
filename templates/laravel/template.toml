@@ -1,48 +1,26 @@
 name = "Laravel (Vue)"
 comment = "Base scaffold for Laravel projects"
-version = "1.0.0"
+version = "1.1.0"
 
 post_install_hook = [
-    "composer install",
-    "./vendor/bin/sail up -d",
+    "docker compose up -d",
+    "docker:laravel.test:composer install",
     "docker:laravel.test:npm install",
     "docker:laravel.test:php artisan key:generate",
     "docker:laravel.test:php artisan storage:link",
     "docker:laravel.test:npm run build",
-    "./vendor/bin/sail artisan migrate",
-    "./vendor/bin/sail down",
+    "docker:laravel.test:php artisan migrate",
+    "docker compose down",
 ]
 
 [hooks]
-# dev = ["./vendor/bin/sail up -d"]
-# stop = ["./vendor/bin/sail down"]
 dev = ["docker compose up -d"]
 stop = ["docker compose down"]
-
-[[dependencies]]
-name = "node"
-check = "node --version"
-install_hint = "https://nodejs.org/en/download/"
 
 [[dependencies]]
 name = "git"
 check = "git --version"
 install_hint = "https://git-scm.com/downloads"
-
-[[dependencies]]
-name = "npm"
-check = "npm --version"
-install_hint = "Installed with node.js"
-
-[[dependencies]]
-name = "php"
-check = "php --version"
-install_hint = "https://www.php.net/downloads.php"
-
-[[dependencies]]
-name = "composer"
-check = "composer --version"
-install_hint = "https://getcomposer.org/download/"
 
 [[dependencies]]
 name = "docker"
