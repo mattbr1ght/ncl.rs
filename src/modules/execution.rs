@@ -31,11 +31,75 @@ pub fn execute_command(spec: &CommandSpec, project_path: &Path) -> Result<Output
     debug!("Executing command: {:?} in {}", spec, project_path.display());
 
     match &spec.context {
-        ExecutionContext::Host => execute_host_command(&spec.command, project_path),
+        ExecutionContext::Host => {
+            // Check if this is a docker compose command that needs project name
+            let cmd = &spec.command;
+            if (cmd.contains("docker compose") || cmd.contains("docker-compose")) 
+                && (cmd.contains("up") || cmd.contains("down") || cmd.contains("start") || cmd.contains("stop")) {
+                execute_docker_compose_command(cmd, project_path)
+            } else {
+                execute_host_command(cmd, project_path)
+            }
+        },
         ExecutionContext::Docker { container, service } => {
             execute_docker_command(&spec.command, project_path, container, service.as_deref())
         }
     }
+}
+
+/// Execute docker compose commands with proper project name
+fn execute_docker_compose_command(cmd: &str, project_path: &Path) -> Result<Output> {
+    check_docker_permissions()?;
+    let project_name = get_project_name(project_path);
+    let compose_cmd = get_compose_command()?;
+    
+    // Parse the command and rebuild it with project name
+    // cmd is like "docker compose up -d" or "./vendor/bin/sail up -d"
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
+    
+    if cmd.contains("sail") {
+        // For sail commands, just run as-is (sail handles its own project naming)
+        return execute_host_command(cmd, project_path);
+    }
+    
+    let mut command = Command::new(compose_cmd);
+    if compose_cmd == "docker" {
+        command.arg("compose");
+    }
+    
+    // Add project name and compose file
+    if let Some(compose_file) = find_compose_file(project_path) {
+        command.arg("-p").arg(&project_name);
+        command.arg("-f").arg(compose_file);
+    }
+    
+    // Add the rest of the command (up, down, start, stop, etc.)
+    if compose_cmd == "docker" {
+        // Skip "docker compose" from the command
+        if parts.len() >= 2 && parts[0] == "docker" && parts[1] == "compose" {
+            for arg in parts.iter().skip(2) {
+                command.arg(arg);
+            }
+        } else {
+            // Fallback: just execute as host command
+            return execute_host_command(cmd, project_path);
+        }
+    } else {
+        // docker-compose: skip "docker-compose"
+        if parts.len() >= 1 && parts[0] == "docker-compose" {
+            for arg in parts.iter().skip(1) {
+                command.arg(arg);
+            }
+        } else {
+            return execute_host_command(cmd, project_path);
+        }
+    }
+    
+    command
+        .current_dir(project_path)
+        .env("COMPOSE_PROJECT_NAME", &project_name)
+        .output()
+        .with_context(|| format!("Failed to execute docker compose command: {}", cmd))
 }
 
 fn execute_host_command(cmd: &str, working_directory: &Path) -> Result<Output> {
@@ -154,6 +218,7 @@ fn ensure_service_running(
     project_path: &Path,
 ) -> Result<()> {
     let compose_cmd = get_compose_command()?;
+    let project_name = get_project_name(project_path);
     
     // Check if service is running
     let mut check_cmd = Command::new(compose_cmd);
@@ -161,12 +226,15 @@ fn ensure_service_running(
         check_cmd.arg("compose");
     }
     check_cmd
+        .arg("-p")
+        .arg(&project_name)
         .arg("-f")
         .arg(compose_path)
         .arg("ps")
         .arg("-q")
         .arg(service_name)
-        .current_dir(project_path);
+        .current_dir(project_path)
+        .env("COMPOSE_PROJECT_NAME", &project_name);
     
     let check_output = check_cmd.output()
         .with_context(|| "Failed to check if service is running. Make sure you have docker permissions.")?;
@@ -179,12 +247,15 @@ fn ensure_service_running(
             start_cmd.arg("compose");
         }
         start_cmd
+            .arg("-p")
+            .arg(&project_name)
             .arg("-f")
             .arg(compose_path)
             .arg("up")
             .arg("-d")
             .arg(service_name)
             .current_dir(project_path)
+            .env("COMPOSE_PROJECT_NAME", &project_name)
             .output()
             .with_context(|| format!("Failed to start service '{}'. Make sure you have docker permissions.", service_name))?;
         
@@ -210,6 +281,17 @@ fn get_docker_user_flag() -> Option<String> {
     None
 }
 
+/// Get the project name from the project directory (for COMPOSE_PROJECT_NAME)
+fn get_project_name(project_path: &Path) -> String {
+    // Use directory name as project name, sanitized for Docker Compose
+    project_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("ncl-project")
+        .to_lowercase()
+        .replace([' ', '.', '_'], "-")
+}
+
 fn execute_docker_command(
     cmd: &str,
     project_path: &Path,
@@ -220,6 +302,7 @@ fn execute_docker_command(
     check_docker_permissions()?;
     
     let compose_file = find_compose_file(project_path);
+    let project_name = get_project_name(project_path);
     
     // Use docker-compose exec if service is specified and compose file exists
     if let (Some(service_name), Some(compose_path)) = (service, compose_file) {
@@ -233,6 +316,8 @@ fn execute_docker_command(
         }
         
         command
+            .arg("-p") // Set project name to avoid conflicts
+            .arg(&project_name)
             .arg("-f")
             .arg(compose_path)
             .arg("exec");
@@ -252,6 +337,7 @@ fn execute_docker_command(
             .arg("-c")
             .arg(cmd)
             .current_dir(project_path)
+            .env("COMPOSE_PROJECT_NAME", &project_name) // Also set env var for compatibility
             .output()
             .with_context(|| {
                 format!(
@@ -288,6 +374,63 @@ fn execute_docker_command(
     }
 }
 
+/// Start all Docker Compose services for a project
+pub fn start_all_services(project_path: &Path) -> Result<Output> {
+    let compose_file = find_compose_file(project_path);
+    let project_name = get_project_name(project_path);
+    
+    let Some(compose_path) = compose_file else {
+        return Err(anyhow::anyhow!("No compose.yaml or docker-compose.yml found in project"));
+    };
+    
+    check_docker_permissions()?;
+    let compose_cmd = get_compose_command()?;
+    let mut command = Command::new(compose_cmd);
+    if compose_cmd == "docker" {
+        command.arg("compose");
+    }
+    
+    command
+        .arg("-p")
+        .arg(&project_name)
+        .arg("-f")
+        .arg(compose_path)
+        .arg("up")
+        .arg("-d")
+        .current_dir(project_path)
+        .env("COMPOSE_PROJECT_NAME", &project_name)
+        .output()
+        .with_context(|| format!("Failed to start services for project: {}", project_name))
+}
+
+/// Stop all Docker Compose services for a project
+pub fn stop_all_services(project_path: &Path) -> Result<Output> {
+    let compose_file = find_compose_file(project_path);
+    let project_name = get_project_name(project_path);
+    
+    let Some(compose_path) = compose_file else {
+        return Err(anyhow::anyhow!("No compose.yaml or docker-compose.yml found in project"));
+    };
+    
+    check_docker_permissions()?;
+    let compose_cmd = get_compose_command()?;
+    let mut command = Command::new(compose_cmd);
+    if compose_cmd == "docker" {
+        command.arg("compose");
+    }
+    
+    command
+        .arg("-p")
+        .arg(&project_name)
+        .arg("-f")
+        .arg(compose_path)
+        .arg("down")
+        .current_dir(project_path)
+        .env("COMPOSE_PROJECT_NAME", &project_name)
+        .output()
+        .with_context(|| format!("Failed to stop services for project: {}", project_name))
+}
+
 /// Parse a command string into a CommandSpec
 /// Supports syntax: 
 /// - "command" - runs on host
@@ -295,9 +438,11 @@ fn execute_docker_command(
 /// - Commands containing "sail" or docker-compose management are forced to host
 pub fn parse_command(cmd: &str) -> CommandSpec {
     // Commands that manage docker-compose (like sail) should run on host
+    // Also handle docker compose up/down commands
     let is_docker_management = cmd.contains("sail") 
         || cmd.contains("docker-compose") 
-        || cmd.contains("docker compose");
+        || cmd.contains("docker compose")
+        || (cmd.contains("docker") && (cmd.contains("up") || cmd.contains("down") || cmd.contains("start") || cmd.contains("stop")));
     
     if is_docker_management {
         return CommandSpec {

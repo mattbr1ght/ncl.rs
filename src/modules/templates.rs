@@ -26,10 +26,9 @@ pub struct Template {
     /// Post-install hook (deprecated, use hooks instead)
     #[serde(default)]
     pub post_install_hook: Hook,
-    /// Named hooks for different execution contexts
+    /// Named hooks - now only flat table
     #[serde(default)]
     pub hooks: HashMap<String, Hook>,
-    pub jobs: Option<HashMap<String, Vec<String>>>,
 }
 
 impl Default for Template {
@@ -41,7 +40,6 @@ impl Default for Template {
             dependencies: vec![],
             post_install_hook: vec![],
             hooks: HashMap::new(),
-            jobs: None,
         }
     }
 }
@@ -180,29 +178,37 @@ fn ensure_templates_exist() -> Result<()> {
 }
 
 /// Writes default templates to the target path
+/// Note: universal-base is extracted but immediately moved to its separate directory
 pub fn write_default_templates(target_path: &Path) -> Result<()> {
     std::fs::create_dir_all(target_path)
         .with_context(|| format!("Failed to create templates directory: {}", target_path.display()))?;
+    
+    // Extract all templates (including universal-base temporarily)
     DEFAULT_TEMPLATES.extract(target_path)
         .with_context(|| format!("Failed to extract default templates to {}", target_path.display()))?;
     
-    // After extracting, move universal-base to its separate directory
+    // Immediately move universal-base to its separate directory and remove from templates
     let universal_source = target_path.join("universal-base");
     if universal_source.exists() {
         let universal_dest = universal_base_dir();
-        std::fs::create_dir_all(universal_dest.parent().unwrap())?;
+        std::fs::create_dir_all(universal_dest.parent().unwrap())
+            .with_context(|| format!("Failed to create universal-base parent directory: {}", universal_dest.parent().unwrap().display()))?;
         
-        // Copy universal-base to separate location
-        if !universal_dest.exists() {
-            copy_dir_recursive(&universal_source, &universal_dest)
-                .context("Failed to copy universal-base to separate directory")?;
+        // Remove existing universal-base in separate directory if it exists
+        if universal_dest.exists() {
+            std::fs::remove_dir_all(&universal_dest)
+                .context("Failed to remove existing universal-base directory")?;
         }
         
-        // Remove universal-base from templates directory
-        if universal_source.exists() {
-            std::fs::remove_dir_all(&universal_source)
-                .context("Failed to remove universal-base from templates directory")?;
-        }
+        // Move universal-base to separate location (not copy, to ensure it's not in templates)
+        copy_dir_recursive(&universal_source, &universal_dest)
+            .context("Failed to copy universal-base to separate directory")?;
+        
+        // Always remove universal-base from templates directory (even if user creates one, it won't conflict)
+        std::fs::remove_dir_all(&universal_source)
+            .context("Failed to remove universal-base from templates directory")?;
+        
+        debug!("Moved universal-base to separate directory: {}", universal_dest.display());
     }
     
     Ok(())

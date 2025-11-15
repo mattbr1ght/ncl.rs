@@ -3,19 +3,25 @@ use anyhow::{Context, Result};
 use crate::modules::common::is_valid_project_path;
 use crate::modules::templates::{run_hook, Template};
 
-fn load_template_from_current_dir() -> Result<Template> {
-    let cwd = std::env::current_dir()?;
-    let meta = std::fs::read_to_string(cwd.join("template.toml"))
-        .context("Failed to read template.toml")?;
-    let mut template: Template = toml::from_str(&meta)
-        .context("Failed to parse template.toml")?;
-    template.path = cwd;
-    Ok(template)
+use std::fs;
+use std::path::PathBuf;
+
+fn find_project_root_with_template() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join("template.toml").is_file() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
 }
 
-fn list_available_jobs(jobs: &std::collections::HashMap<String, Vec<String>>) {
-    for (script, commands) in jobs {
-        println!("{}", script);
+fn list_available_hooks(hooks: &std::collections::HashMap<String, Vec<String>>) {
+    for (name, commands) in hooks {
+        println!("{}", name);
         for command in commands {
             println!("    {}", command);
         }
@@ -23,36 +29,32 @@ fn list_available_jobs(jobs: &std::collections::HashMap<String, Vec<String>>) {
 }
 
 pub fn run(job: Option<String>) -> Result<()> {
-    let cwd = std::env::current_dir()?;
-    
-    if !is_valid_project_path(&cwd) {
-        cliclack::outro("You are not in a valid project directory")?;
+    let project_root = find_project_root_with_template().ok_or_else(|| anyhow::anyhow!("Not in a project directory (no template.toml found above)") )?;
+    let meta = fs::read_to_string(project_root.join("template.toml"))
+        .context("Failed to read template.toml")?;
+    let mut template: Template = toml::from_str(&meta)
+        .context("Failed to parse template.toml")?;
+    template.path = project_root.clone();
+
+    if template.hooks.is_empty() {
+        cliclack::outro("No hooks defined in template.toml")?;
         return Ok(());
     }
 
-    let template = load_template_from_current_dir()?;
-    let jobs = match template.jobs {
-        Some(jobs) => jobs,
-        None => {
-            cliclack::outro("No jobs defined in template.toml")?;
-            return Ok(());
-        }
-    };
-
     match job {
         None => {
-            list_available_jobs(&jobs);
+            list_available_hooks(&template.hooks);
             Ok(())
         }
         Some(job_name) => {
-            match jobs.get(&job_name) {
+            match template.hooks.get(&job_name) {
                 Some(commands) => {
-                    run_hook(commands, &cwd)?;
+                    run_hook(commands, &project_root)?;
                     cliclack::outro("")?;
                     Ok(())
                 }
                 None => {
-                    cliclack::outro("The job does not exist")?;
+                    cliclack::outro(&format!("The hook '{}' does not exist", job_name))?;
                     Ok(())
                 }
             }

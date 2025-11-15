@@ -10,7 +10,14 @@ post_install_hook = [
     "docker:laravel.test:php artisan storage:link",
     "docker:laravel.test:npm run build",
     "./vendor/bin/sail artisan migrate",
+    "./vendor/bin/sail down",
 ]
+
+[hooks]
+# dev = ["./vendor/bin/sail up -d"]
+# stop = ["./vendor/bin/sail down"]
+dev = ["docker compose up -d"]
+stop = ["docker compose down"]
 
 [[dependencies]]
 name = "node"

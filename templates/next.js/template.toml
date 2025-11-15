@@ -3,9 +3,12 @@ comment = "Base scaffold for Next.js projects"
 version = "1.0.0"
 
 post_install_hook = [
-    "npm install",
-    "npm run build",
+    "docker compose up -d --build",
 ]
+
+[hooks]
+dev = ["docker compose up -d"]
+stop = ["docker compose down"]
 
 [[dependencies]]
 name = "node"
