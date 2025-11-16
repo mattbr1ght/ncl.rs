@@ -5,19 +5,85 @@ use std::path::PathBuf;
 
 use crate::modules::common::ncl_config_dir;
 
+/// GitHub configuration defaults
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct GitHubDefaults {
+    /// Default organization to use (if empty, uses personal)
+    #[serde(default)]
+    pub default_org: Option<String>,
+    /// Default repository visibility
+    #[serde(default)]
+    pub default_visibility: Option<String>,
+}
+
+/// Coolify configuration defaults (global)
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct CoolifyDefaults {
+    /// Coolify API endpoint
+    #[serde(default)]
+    pub api_endpoint: Option<String>,
+    /// Coolify API token
+    #[serde(default)]
+    pub api_token: Option<String>,
+    /// Default server ID
+    #[serde(default)]
+    pub default_server_id: Option<String>,
+}
+
+/// Project-level Coolify configuration
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ProjectCoolifyConfig {
+    /// Coolify project ID (created during scaffolding)
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// Coolify API endpoint (copied from global defaults)
+    #[serde(default)]
+    pub api_endpoint: Option<String>,
+    /// Server ID used for this project
+    #[serde(default)]
+    pub server_id: Option<String>,
+}
+
+/// Project-level configuration stored in .ncl/config.toml
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ProjectConfig {
+    /// Coolify project configuration
+    #[serde(default)]
+    pub coolify: ProjectCoolifyConfig,
+    /// GitHub repository URL
+    #[serde(default)]
+    pub github_repo_url: Option<String>,
+    /// GitHub repository owner (user or org)
+    #[serde(default)]
+    pub github_repo_owner: Option<String>,
+    /// GitHub repository name
+    #[serde(default)]
+    pub github_repo_name: Option<String>,
+}
+
 /// Global NCL configuration stored in config directory
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct NclConfig {
     /// GitHub personal access token (also stored in keyring)
     pub github_token: Option<String>,
     /// Skip GitHub integration during project initialization
+    #[serde(default)]
     pub skip_github: bool,
     /// Skip Trello integration (future feature)
+    #[serde(default)]
     pub skip_trello: bool,
     /// Skip Coolify CI/CD setup (future feature)
+    #[serde(default)]
     pub skip_coolify: bool,
     /// Default preferences for project initialization
+    #[serde(default)]
     pub defaults: HashMap<String, String>,
+    /// GitHub defaults
+    #[serde(default)]
+    pub github: GitHubDefaults,
+    /// Coolify defaults
+    #[serde(default)]
+    pub coolify: CoolifyDefaults,
 }
 
 impl NclConfig {
@@ -77,6 +143,40 @@ impl NclConfig {
 
 fn config_file_path() -> PathBuf {
     ncl_config_dir().join("config.toml")
+}
+
+impl ProjectConfig {
+    /// Load project configuration from .ncl/config.toml in project directory
+    pub fn load(project_path: &PathBuf) -> Result<Self> {
+        let config_path = project_path.join(".ncl").join("config.toml");
+        
+        if !config_path.exists() {
+            return Ok(Self::default());
+        }
+
+        let content = std::fs::read_to_string(&config_path)
+            .with_context(|| format!("Failed to read project config file: {}", config_path.display()))?;
+        
+        toml::from_str(&content)
+            .with_context(|| "Failed to parse project config file")
+    }
+
+    /// Save project configuration to .ncl/config.toml
+    pub fn save(&self, project_path: &PathBuf) -> Result<()> {
+        let config_dir = project_path.join(".ncl");
+        std::fs::create_dir_all(&config_dir)
+            .with_context(|| format!("Failed to create .ncl directory: {}", config_dir.display()))?;
+        
+        let config_path = config_dir.join("config.toml");
+        
+        let content = toml::to_string_pretty(self)
+            .context("Failed to serialize project config")?;
+        
+        std::fs::write(&config_path, content)
+            .with_context(|| format!("Failed to write project config file: {}", config_path.display()))?;
+        
+        Ok(())
+    }
 }
 
 fn get_token_from_keyring() -> Result<String> {

@@ -18,7 +18,17 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Initializes a project
-    Init,
+    Init {
+        /// Skip GitHub integration
+        #[arg(long)]
+        skip_github: bool,
+        /// Skip Coolify integration
+        #[arg(long)]
+        skip_coolify: bool,
+        /// Skip Trello integration
+        #[arg(long)]
+        skip_trello: bool,
+    },
     /// Checks environment for missing dependencies of the current project
     Check,
     /// Runs predefined scripts. Without arguments shows available scripts
@@ -51,7 +61,9 @@ fn main() -> Result<()> {
     init_logging(cli.verbose);
 
     match &cli.command {
-        Some(Commands::Init) => commands::init::run(),
+        Some(Commands::Init { skip_github, skip_coolify, skip_trello }) => {
+            commands::init::run(*skip_github, *skip_coolify, *skip_trello)
+        }
         Some(Commands::Check) => commands::check::run(),
         Some(Commands::Run { job }) => commands::run::run(job.clone()),
         Some(Commands::Task) => commands::task::run(),

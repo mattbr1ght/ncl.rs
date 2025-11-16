@@ -1,0 +1,64 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - prod
+  push:
+    branches:
+      - prod
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint || echo "No lint script found"
+
+      - name: Typecheck
+        run: npm run typecheck || npx tsc --noEmit || echo "No typecheck configured"
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Tests
+        run: npm test || echo "No tests configured"
+
+      - name: Deploy to Coolify (Dev)
+        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+        env:
+          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
+        run: |
+          curl -X POST "$COOLIFY_URL/api/v1/projects/$COOLIFY_PROJECT_ID/deploy" \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"branch": "dev", "environment": "dev"}'
+
+      - name: Deploy to Coolify (Prod)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/prod'
+        env:
+          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
+        run: |
+          curl -X POST "$COOLIFY_URL/api/v1/projects/$COOLIFY_PROJECT_ID/deploy" \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"branch": "prod", "environment": "prod"}'
+

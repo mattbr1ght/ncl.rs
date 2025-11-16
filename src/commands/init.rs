@@ -73,14 +73,25 @@ fn display_missing_dependencies(template: &Template) -> Result<()> {
     Ok(())
 }
 
-pub fn run() -> Result<()> {
+pub fn run(skip_github: bool, skip_coolify: bool, skip_trello: bool) -> Result<()> {
     debug!("Starting project initialization");
     
     cliclack::clear_screen()?;
     cliclack::intro(style(" init ").on_green().black())?;
 
-    let config = NclConfig::load()
+    let mut config = NclConfig::load()
         .context("Failed to load NCL configuration")?;
+    
+    // Override config with CLI flags
+    if skip_github {
+        config.skip_github = true;
+    }
+    if skip_coolify {
+        config.skip_coolify = true;
+    }
+    if skip_trello {
+        config.skip_trello = true;
+    }
     
     let cwd = std::env::current_dir()?;
     let project_name = prompt_project_name()?;
