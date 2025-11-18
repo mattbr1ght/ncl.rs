@@ -7,12 +7,18 @@ on:
       - prod
   push:
     branches:
+      - dev
       - prod
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ci:
     runs-on: ubuntu-latest
-    
+    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/prod' && 'production' || github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'development' || '' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,27 +44,63 @@ jobs:
       - name: Run Tests
         run: npm test || echo "No tests configured"
 
+      - name: Build and Push Docker Image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}-${{ github.sha }}
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}-latest
+          secrets: |
+            "username=${{ secrets.REGISTRY_USER }}"
+            "password=${{ secrets.REGISTRY_TOKEN }}"
+
       - name: Deploy to Coolify (Dev)
-        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         env:
-          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
-          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
+          WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_DEV }}
         run: |
-          curl -X POST "$COOLIFY_URL/api/v1/projects/$COOLIFY_PROJECT_ID/deploy" \
-            -H "Authorization: Bearer $COOLIFY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"branch": "dev", "environment": "dev"}'
+          if [ -n "$WEBHOOK_URL" ]; then
+            curl -X POST "$WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"branch": "dev"}'
+          else
+            echo "COOLIFY_WEBHOOK_DEV not configured, skipping deployment"
+          fi
+
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/prod'
+    environment: production
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Tests (Fast)
+        run: npm test || echo "No tests configured"
 
       - name: Deploy to Coolify (Prod)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/prod'
         env:
-          COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
-          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          COOLIFY_PROJECT_ID: ${{ secrets.COOLIFY_PROJECT_ID }}
+          WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_PROD }}
         run: |
-          curl -X POST "$COOLIFY_URL/api/v1/projects/$COOLIFY_PROJECT_ID/deploy" \
-            -H "Authorization: Bearer $COOLIFY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"branch": "prod", "environment": "prod"}'
+          if [ -n "$WEBHOOK_URL" ]; then
+            curl -X POST "$WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d '{"branch": "prod"}'
+          else
+            echo "COOLIFY_WEBHOOK_PROD not configured, skipping deployment"
+          fi
 

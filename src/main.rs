@@ -38,6 +38,8 @@ enum Commands {
     },
     /// Displays TODOs in code. Similar to `rg TODO`
     Task,
+    /// Validates keyring, GitHub token, and Coolify connectivity
+    Doctor,
 }
 
 fn init_logging(verbose: bool) {
@@ -67,6 +69,7 @@ fn main() -> Result<()> {
         Some(Commands::Check) => commands::check::run(),
         Some(Commands::Run { job }) => commands::run::run(job.clone()),
         Some(Commands::Task) => commands::task::run(),
+        Some(Commands::Doctor) => commands::doctor::run(),
         None => {
             let mut cmd = <Cli as CommandFactory>::command();
             cmd.print_help()

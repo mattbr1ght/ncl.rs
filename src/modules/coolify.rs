@@ -17,10 +17,21 @@ struct CreateProjectRequest {
 #[derive(Deserialize)]
 struct CreateProjectResponse {
     id: Option<String>,
-    uuid: Option<String>,
     #[serde(rename = "uuid")]
-    project_uuid: Option<String>,
+    uuid: Option<String>,
     message: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CreateEnvironmentRequest {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct EnvironmentResponse {
+    id: Option<String>,
+    uuid: Option<String>,
+    webhook_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -66,40 +77,100 @@ impl CoolifyClient {
 
         let project_id = project_response.id
             .or(project_response.uuid)
-            .or(project_response.project_uuid)
             .ok_or_else(|| anyhow::anyhow!("Project ID not found in response"))?;
 
         debug!("Successfully created Coolify project: {}", project_id);
         Ok(project_id)
     }
 
-    /// Triggers a deployment for a project
-    pub fn trigger_deployment(&self, project_id: &str, branch: &str, environment: &str) -> Result<()> {
-        debug!("Triggering deployment for project {} on branch {} (env: {})", project_id, branch, environment);
+    /// Creates an environment in a Coolify project
+    pub fn create_environment(&self, project_id: &str, environment_name: &str) -> Result<String> {
+        debug!("Creating environment '{}' in project {}", environment_name, project_id);
 
         let client = reqwest::blocking::Client::new();
         
-        let deploy_request = CreateDeploymentRequest {
-            branch: branch.to_string(),
-            environment: environment.to_string(),
+        let request = CreateEnvironmentRequest {
+            name: environment_name.to_string(),
         };
 
         let response = client
-            .post(&format!("{}/api/v1/projects/{}/deploy", self.api_endpoint, project_id))
+            .post(&format!("{}/api/v1/projects/{}/environments", self.api_endpoint, project_id))
             .header("Authorization", &format!("Bearer {}", self.api_token))
             .header("Content-Type", "application/json")
-            .json(&deploy_request)
+            .json(&request)
             .send()
-            .context("Failed to send deployment request to Coolify API")?;
+            .context("Failed to send request to Coolify API")?;
 
         if !response.status().is_success() {
             let error_text = response.text().unwrap_or_default();
-            return Err(anyhow::anyhow!("Failed to trigger deployment: {}", error_text));
+            return Err(anyhow::anyhow!("Failed to create environment: {}", error_text));
         }
 
-        debug!("Successfully triggered deployment");
+        let env_response: EnvironmentResponse = response.json()
+            .context("Failed to parse Coolify API response")?;
+
+        let env_id = env_response.id
+            .or(env_response.uuid)
+            .ok_or_else(|| anyhow::anyhow!("Environment ID not found in response"))?;
+
+        debug!("Successfully created environment: {}", env_id);
+        Ok(env_id)
+    }
+
+    /// Gets webhook URL for an environment
+    pub fn get_environment_webhook(&self, project_id: &str, environment_name: &str) -> Result<Option<String>> {
+        debug!("Getting webhook for environment '{}' in project {}", environment_name, project_id);
+
+        let client = reqwest::blocking::Client::new();
+        
+        let response = client
+            .get(&format!("{}/api/v1/projects/{}/environments/{}", self.api_endpoint, project_id, environment_name))
+            .header("Authorization", &format!("Bearer {}", self.api_token))
+            .header("Content-Type", "application/json")
+            .send()
+            .context("Failed to send request to Coolify API")?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().unwrap_or_default();
+            debug!("Failed to get environment webhook: {}", error_text);
+            return Ok(None);
+        }
+
+        let env_response: EnvironmentResponse = response.json()
+            .context("Failed to parse Coolify API response")?;
+
+        Ok(env_response.webhook_url)
+    }
+
+    /// Deletes a Coolify project
+    pub fn delete_project(&self, project_id: &str) -> Result<()> {
+        debug!("Deleting Coolify project: {}", project_id);
+
+        let client = reqwest::blocking::Client::new();
+        
+        let response = client
+            .delete(&format!("{}/api/v1/projects/{}", self.api_endpoint, project_id))
+            .header("Authorization", &format!("Bearer {}", self.api_token))
+            .header("Content-Type", "application/json")
+            .send()
+            .context("Failed to send request to Coolify API")?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().unwrap_or_default();
+            return Err(anyhow::anyhow!("Failed to delete project: {}", error_text));
+        }
+
+        debug!("Successfully deleted Coolify project");
         Ok(())
     }
+}
+
+/// Prompts user if they want to set up Coolify
+pub fn prompt_coolify_setup() -> Result<bool> {
+    cliclack::confirm("Would you like to set up Coolify integration?")
+        .initial_value(false)
+        .interact()
+        .map_err(|e| anyhow::anyhow!("Input error: {}", e))
 }
 
 /// Prompts user for Coolify configuration

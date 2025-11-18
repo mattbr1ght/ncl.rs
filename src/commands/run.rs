@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 
-use crate::modules::common::is_valid_project_path;
 use crate::modules::templates::{run_hook, Template};
+use crate::modules::cleanup;
 
 use std::fs;
 use std::path::PathBuf;
@@ -47,15 +47,21 @@ pub fn run(job: Option<String>) -> Result<()> {
             Ok(())
         }
         Some(job_name) => {
-            match template.hooks.get(&job_name) {
-                Some(commands) => {
-                    run_hook(commands, &project_root)?;
-                    cliclack::outro("")?;
-                    Ok(())
-                }
-                None => {
-                    cliclack::outro(&format!("The hook '{}' does not exist", job_name))?;
-                    Ok(())
+            // Special handling for remove-project hook
+            if job_name == "remove-project" {
+                cleanup::remove_project(&project_root)?;
+                Ok(())
+            } else {
+                match template.hooks.get(&job_name) {
+                    Some(commands) => {
+                        run_hook(commands, &project_root)?;
+                        cliclack::outro("")?;
+                        Ok(())
+                    }
+                    None => {
+                        cliclack::outro(&format!("The hook '{}' does not exist", job_name))?;
+                        Ok(())
+                    }
                 }
             }
         }

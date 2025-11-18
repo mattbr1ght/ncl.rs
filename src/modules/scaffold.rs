@@ -10,7 +10,16 @@ use crate::modules::common::Installable;
 use crate::modules::permissions::fix_file_ownership;
 use crate::modules::github::{self, CreateRepoRequest};
 use crate::modules::git;
-use crate::modules::coolify::{CoolifyClient, prompt_coolify_config};
+use crate::modules::coolify::{CoolifyClient, prompt_coolify_config, prompt_coolify_setup};
+use crate::modules::keyring::{Keyring, accounts};
+
+/// Rollback state for error handling
+#[derive(Default)]
+struct RollbackState {
+    coolify_project_id: Option<String>,
+    github_repo_owner: Option<String>,
+    github_repo_name: Option<String>,
+}
 
 #[derive(Serialize)]
 pub struct ProjectOptions {
@@ -58,34 +67,107 @@ impl ProjectOptions {
         // Initialize project config
         let mut project_config = ProjectConfig::default();
         
-        // Setup Coolify integration (prompt and create project)
-        if !self.config.skip_coolify {
-            self.setup_coolify_integration(&mut project_config)?;
+        // Track what we've created for rollback
+        let mut rollback_state = RollbackState::default();
+        
+        // Setup Coolify integration (optional, prompt user)
+        let setup_coolify = if self.config.skip_coolify {
+            false
+        } else {
+            prompt_coolify_setup()
+                .context("Failed to prompt for Coolify setup")?
+        };
+        
+        if setup_coolify {
+            match self.setup_coolify_integration(&mut project_config) {
+                Ok(()) => {
+                    rollback_state.coolify_project_id = project_config.coolify.project_id.clone();
+                }
+                Err(e) => {
+                    self.rollback(&rollback_state)?;
+                    return Err(e).context("Failed to set up Coolify integration");
+                }
+            }
         } else {
             debug!("Skipping Coolify integration");
         }
         
         // Initialize git repository and make first commit on dev branch
-        let mut repo = self.initialize_git_and_commit()?;
+        let mut repo = match self.initialize_git_and_commit() {
+            Ok(r) => r,
+            Err(e) => {
+                self.rollback(&rollback_state)?;
+                return Err(e).context("Failed to initialize git repository");
+            }
+        };
         
         // Setup GitHub integration (create repo, set dev as default, add protection)
         if !self.config.skip_github {
-            self.setup_github_integration(&mut repo, &mut project_config)?;
+            match self.setup_github_integration(&mut repo, &mut project_config, setup_coolify) {
+                Ok(()) => {
+                    rollback_state.github_repo_owner = project_config.github_repo_owner.clone();
+                    rollback_state.github_repo_name = project_config.github_repo_name.clone();
+                }
+                Err(e) => {
+                    self.rollback(&rollback_state)?;
+                    return Err(e).context("Failed to set up GitHub integration");
+                }
+            }
         } else {
             debug!("Skipping GitHub integration");
         }
         
         // Save project config to .ncl/config.toml
-        project_config.save(&self.path)
-            .context("Failed to save project configuration")?;
+        if let Err(e) = project_config.save(&self.path) {
+            self.rollback(&rollback_state)?;
+            return Err(e).context("Failed to save project configuration");
+        }
         
         // Make another commit with .ncl/config.toml
-        self.commit_project_config(&repo)?;
+        if let Err(e) = self.commit_project_config(&repo) {
+            self.rollback(&rollback_state)?;
+            return Err(e).context("Failed to commit project configuration");
+        }
         
         // Push all changes
         if !self.config.skip_github {
-            self.push_all_branches(&repo)?;
+            if let Err(e) = self.push_all_branches(&repo) {
+                self.rollback(&rollback_state)?;
+                return Err(e).context("Failed to push branches");
+            }
         }
+        
+        Ok(())
+    }
+    
+    /// Rollback created resources on error
+    fn rollback(&self, state: &RollbackState) -> Result<()> {
+        debug!("Rolling back created resources");
+        
+        // Delete GitHub repo if created
+        if let (Some(owner), Some(repo)) = (&state.github_repo_owner, &state.github_repo_name) {
+            if let Ok(Some(token)) = self.config.get_github_token() {
+                let _ = github::delete_repository(&token, owner, repo);
+            }
+        }
+        
+        // Delete Coolify project if created
+        if let Some(project_id) = &state.coolify_project_id {
+            if let Some(endpoint) = self.config.coolify.api_endpoint.as_deref() {
+                if let Ok(Some(token)) = self.config.get_coolify_token() {
+                    let client = CoolifyClient::new(endpoint.to_string(), token);
+                    let _ = client.delete_project(project_id);
+                }
+            }
+        }
+        
+        // Clean up keyring entries (project-specific)
+        let project_key = format!("{}_{}", self.name, accounts::COOLIFY_TOKEN);
+        let _ = Keyring::delete(&project_key);
+        
+        // Delete .ncl/config.toml if it exists
+        let config_path = self.path.join(".ncl").join("config.toml");
+        let _ = std::fs::remove_file(&config_path);
         
         Ok(())
     }
@@ -158,7 +240,7 @@ impl ProjectOptions {
         Ok(repo)
     }
 
-    fn setup_github_integration(&mut self, repo: &mut git2::Repository, project_config: &mut ProjectConfig) -> Result<()> {
+    fn setup_github_integration(&mut self, repo: &mut git2::Repository, project_config: &mut ProjectConfig, has_coolify: bool) -> Result<()> {
         debug!("Setting up GitHub integration");
         
         let token = self.get_github_token()?;
@@ -201,9 +283,10 @@ impl ProjectOptions {
         };
         
         // Create remote repository with dev as default branch
-        let mut repo_request = CreateRepoRequest {
+        let is_private = self.config.github.default_visibility.as_deref().unwrap_or("private") == "private";
+        let repo_request = CreateRepoRequest {
             name: self.name.clone(),
-            private: self.config.github.default_visibility.as_deref().unwrap_or("private") == "private",
+            private: is_private,
             description: None,
             default_branch: Some("dev".to_string()),
         };
@@ -237,7 +320,54 @@ impl ProjectOptions {
         // Enable GitHub Actions
         github::enable_github_actions(&token, &owner, &self.name)?;
         
-        cliclack::log::info("GitHub repository configured with dev as default branch and branch protection")?;
+        // Create deployment environments
+        github::create_deployment_environment(&token, &owner, &self.name, "development")?;
+        github::create_deployment_environment(&token, &owner, &self.name, "production")?;
+        
+        // Set up GitHub secrets if Coolify is configured
+        if has_coolify {
+            if let Some(coolify_token) = project_config.coolify.api_endpoint.as_ref()
+                .and_then(|_| self.config.get_coolify_token().ok().flatten()) {
+                github::create_or_update_secret(&token, &owner, &self.name, "COOLIFY_TOKEN", &coolify_token)?;
+            }
+            
+            if let Some(webhook_dev) = &project_config.coolify.webhook_dev {
+                github::create_or_update_secret(&token, &owner, &self.name, "COOLIFY_WEBHOOK_DEV", webhook_dev)?;
+            }
+            
+            if let Some(webhook_prod) = &project_config.coolify.webhook_prod {
+                github::create_or_update_secret(&token, &owner, &self.name, "COOLIFY_WEBHOOK_PROD", webhook_prod)?;
+            }
+        }
+        
+        // Set up registry secrets if configured
+        if let Ok(Some((registry_user, registry_token))) = self.config.get_registry_credentials() {
+            github::create_or_update_secret(&token, &owner, &self.name, "REGISTRY_USER", &registry_user)?;
+            github::create_or_update_secret(&token, &owner, &self.name, "REGISTRY_TOKEN", &registry_token)?;
+        }
+        
+        // Optional branch protection
+        let enable_protection = cliclack::confirm("Would you like to enable branch protection rules?")
+            .initial_value(false)
+            .interact()
+            .map_err(|e| anyhow::anyhow!("Input error: {}", e))?;
+        
+        if enable_protection {
+            // Check if private repo (warn about GitHub Pro/Team requirement)
+            if is_private {
+                cliclack::log::warning("Note: Branch protection for private repos requires GitHub Pro or Team plan")?;
+            }
+            
+            // Protect prod: require PR, require status checks, no direct pushes
+            github::add_branch_protection(&token, &owner, &self.name, "prod", true, true, true)?;
+            
+            // Protect dev: require status checks, PR optional
+            github::add_branch_protection(&token, &owner, &self.name, "dev", false, true, false)?;
+            
+            cliclack::log::info("Branch protection rules enabled")?;
+        }
+        
+        cliclack::log::info("GitHub repository configured with dev as default branch")?;
         
         Ok(())
     }
@@ -342,6 +472,10 @@ impl ProjectOptions {
         )
         .context("Failed to get Coolify configuration")?;
         
+        // Store token in keyring
+        let mut global_config = self.config.clone();
+        global_config.set_coolify_token(Some(api_token.clone()))?;
+        
         // Store in project config
         project_config.coolify.api_endpoint = Some(api_endpoint.clone());
         project_config.coolify.server_id = server_id.clone();
@@ -349,24 +483,47 @@ impl ProjectOptions {
         // Create Coolify client and project
         let client = CoolifyClient::new(api_endpoint.clone(), api_token.clone());
         
+        // Normalize project name (lowercase, hyphens instead of underscores)
+        let coolify_project_name = self.name.to_lowercase().replace('_', "-");
+        
         cliclack::log::info("Creating Coolify project...")?;
         
-        let project_id = client.create_project(&self.name)
+        let project_id = client.create_project(&coolify_project_name)
             .context("Failed to create Coolify project")?;
         
         // Store project ID in config
         project_config.coolify.project_id = Some(project_id.clone());
         
+        // Create dev environment
+        cliclack::log::info("Creating dev environment...")?;
+        let _dev_env_id = client.create_environment(&project_id, "dev")
+            .context("Failed to create dev environment")?;
+        
+        // Get dev webhook
+        let webhook_dev = client.get_environment_webhook(&project_id, "dev")
+            .context("Failed to get dev webhook")?;
+        project_config.coolify.webhook_dev = webhook_dev.clone();
+        
+        // Create prod environment (rename from default "production" if needed)
+        cliclack::log::info("Creating prod environment...")?;
+        let _prod_env_id = client.create_environment(&project_id, "prod")
+            .context("Failed to create prod environment")?;
+        
+        // Get prod webhook
+        let webhook_prod = client.get_environment_webhook(&project_id, "prod")
+            .context("Failed to get prod webhook")?;
+        project_config.coolify.webhook_prod = webhook_prod.clone();
+        
         // Update global config with defaults for future use
-        let mut global_config = self.config.clone();
         global_config.coolify.api_endpoint = Some(api_endpoint);
-        global_config.coolify.api_token = Some(api_token);
         if let Some(server_id) = server_id {
             global_config.coolify.default_server_id = Some(server_id);
         }
         global_config.save()?;
         
-        cliclack::log::info(&format!("Successfully created Coolify project: {}", project_id))?;
+        cliclack::log::info(&format!("Successfully created Coolify project: {} with dev and prod environments", project_id))?;
+        debug!("Coolify project config: {:?}", &project_config.coolify);
+        debug!("Coolify global config: {:?}", &project_config.coolify);
         
         Ok(())
     }

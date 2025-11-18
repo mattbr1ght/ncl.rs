@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::modules::common::ncl_config_dir;
+use crate::modules::keyring::{Keyring, accounts};
 
 /// GitHub configuration defaults
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -42,6 +43,12 @@ pub struct ProjectCoolifyConfig {
     /// Server ID used for this project
     #[serde(default)]
     pub server_id: Option<String>,
+    /// Webhook URL for dev environment
+    #[serde(default)]
+    pub webhook_dev: Option<String>,
+    /// Webhook URL for prod environment
+    #[serde(default)]
+    pub webhook_prod: Option<String>,
 }
 
 /// Project-level configuration stored in .ncl/config.toml
@@ -118,13 +125,11 @@ impl NclConfig {
         Ok(())
     }
 
-    /// Get GitHub token from config or keyring
+    /// Get GitHub token from keyring or config
     pub fn get_github_token(&self) -> Result<Option<String>> {
         // First try keyring
-        if let Ok(token) = get_token_from_keyring() {
-            if !token.is_empty() {
-                return Ok(Some(token));
-            }
+        if let Ok(Some(token)) = Keyring::get(accounts::GITHUB_TOKEN) {
+            return Ok(Some(token));
         }
 
         // Fallback to config file
@@ -134,10 +139,55 @@ impl NclConfig {
     /// Set GitHub token in both keyring and config
     pub fn set_github_token(&mut self, token: Option<String>) -> Result<()> {
         if let Some(ref token) = token {
-            store_token_in_keyring(token)?;
+            Keyring::set(accounts::GITHUB_TOKEN, token)?;
+        } else {
+            let _ = Keyring::delete(accounts::GITHUB_TOKEN);
         }
         self.github_token = token;
         self.save()
+    }
+    
+    /// Get Coolify token from keyring
+    pub fn get_coolify_token(&self) -> Result<Option<String>> {
+        Keyring::get(accounts::COOLIFY_TOKEN)
+    }
+    
+    /// Set Coolify token in keyring
+    pub fn set_coolify_token(&mut self, token: Option<String>) -> Result<()> {
+        if let Some(ref token) = token {
+            Keyring::set(accounts::COOLIFY_TOKEN, token)?;
+        } else {
+            let _ = Keyring::delete(accounts::COOLIFY_TOKEN);
+        }
+        Ok(())
+    }
+    
+    /// Get registry credentials from keyring
+    pub fn get_registry_credentials(&self) -> Result<Option<(String, String)>> {
+        let user = Keyring::get(accounts::REGISTRY_USER)?;
+        let token = Keyring::get(accounts::REGISTRY_TOKEN)?;
+        
+        match (user, token) {
+            (Some(u), Some(t)) => Ok(Some((u, t))),
+            _ => Ok(None),
+        }
+    }
+    
+    /// Set registry credentials in keyring
+    pub fn set_registry_credentials(&mut self, user: Option<String>, token: Option<String>) -> Result<()> {
+        if let Some(ref u) = user {
+            Keyring::set(accounts::REGISTRY_USER, u)?;
+        } else {
+            let _ = Keyring::delete(accounts::REGISTRY_USER);
+        }
+        
+        if let Some(ref t) = token {
+            Keyring::set(accounts::REGISTRY_TOKEN, t)?;
+        } else {
+            let _ = Keyring::delete(accounts::REGISTRY_TOKEN);
+        }
+        
+        Ok(())
     }
 }
 
@@ -179,27 +229,4 @@ impl ProjectConfig {
     }
 }
 
-fn get_token_from_keyring() -> Result<String> {
-    use keyring::Entry;
-    
-    let service = "ncl-cli";
-    let user = whoami::username();
-    let entry = Entry::new(service, &user)
-        .context("Failed to access keyring")?;
-    
-    entry.get_password()
-        .map_err(|e| anyhow::anyhow!("Keyring error: {}", e))
-}
-
-fn store_token_in_keyring(token: &str) -> Result<()> {
-    use keyring::Entry;
-    
-    let service = "ncl-cli";
-    let user = whoami::username();
-    let entry = Entry::new(service, &user)
-        .context("Failed to access keyring")?;
-    
-    entry.set_password(token)
-        .map_err(|e| anyhow::anyhow!("Failed to store token in keyring: {}", e))
-}
 
