@@ -208,39 +208,87 @@ pub fn add_branch_protection(
     Ok(())
 }
 
-/// Enables GitHub Actions for a repository
+/// Enables GitHub Actions for a repository.
+///
+/// This is a best-effort helper – many organizations enforce Actions/Workflow
+/// settings at the org level, so these calls may legitimately return 403/404.
+/// We treat those as non-fatal and only log them at debug level.
 pub fn enable_github_actions(token: &str, owner: &str, repo: &str) -> Result<()> {
     debug!("Enabling GitHub Actions for {}/{}", owner, repo);
 
     let client = reqwest::blocking::Client::new();
 
-    // Enable Actions by setting actions permissions
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/actions/permissions",
-        owner, repo
-    );
-
-    let response = client
-        .put(&url)
-        .header("User-Agent", "NCL-CLI")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(token)
-        .json(&serde_json::json!({
-            "enabled": true,
-            "allowed_actions": "all"
-        }))
-        .send()
-        .context("Failed to send request to GitHub API")?;
-
-    if !response.status().is_success() {
-        let error_text = response.text().unwrap_or_default();
-        // This might fail if Actions are already enabled or if user doesn't have permission
-        debug!(
-            "Failed to enable GitHub Actions (may already be enabled): {}",
-            error_text
+    // 1) Best-effort: repo-level Actions permissions
+    {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/permissions",
+            owner, repo
         );
-    } else {
-        debug!("Successfully enabled GitHub Actions");
+
+        let response = client
+            .put(&url)
+            .header("User-Agent", "NCL-CLI")
+            .header("Accept", "application/vnd.github.v3+json")
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "enabled": true,
+                "allowed_actions": "all"
+            }))
+            .send()
+            .context("Failed to send request to GitHub API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().unwrap_or_default();
+            debug!(
+                "Failed to set Actions permissions for {}/{} (status {}): {} \
+                 (this is often expected if the org enforces settings)",
+                owner,
+                repo,
+                status,
+                error_text
+            );
+        } else {
+            debug!("Successfully set Actions permissions for {}/{}", owner, repo);
+        }
+    }
+
+    // 2) Best-effort: workflow permissions (needed on some orgs)
+    {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/permissions/workflow",
+            owner, repo
+        );
+
+        let response = client
+            .put(&url)
+            .header("User-Agent", "NCL-CLI")
+            .header("Accept", "application/vnd.github.v3+json")
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "can_approve_pull_request_reviews": true,
+                "default_workflow_permissions": "write"
+            }))
+            .send()
+            .context("Failed to send request to GitHub API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().unwrap_or_default();
+            debug!(
+                "Failed to set workflow permissions for {}/{} (status {}): {} \
+                 (this is often expected if the org enforces settings)",
+                owner,
+                repo,
+                status,
+                error_text
+            );
+        } else {
+            debug!(
+                "Successfully set workflow permissions for {}/{}",
+                owner, repo
+            );
+        }
     }
 
     Ok(())

@@ -753,25 +753,13 @@ impl ProjectOptions {
             .interact()
             .map_err(|e| anyhow::anyhow!("Input error: {}", e))?;
 
-        // Prompt for exposed port
-        let ports_exposes: String =
-            cliclack::input("Exposed port (container port, e.g., 80, 3000):")
-                .placeholder("80")
-                .default_input("80")
-                .validate(|input: &String| {
-                    if input.is_empty() {
-                        Err("Port is required")
-                    } else if input.parse::<u16>().is_err() {
-                        Err("Port must be a valid number (1-65535)")
-                    } else {
-                        Ok(())
-                    }
-                })
-                .interact()
-                .map_err(|e| anyhow::anyhow!("Input error: {}", e))?;
+        // Coolify requires that the application container exposes port 80 internally.
+        // Do not prompt the user; always use 80 as the exposed container port.
+        let ports_exposes: String = "80".to_string();
 
         let repository = format!("{}/{}", github_owner, github_repo);
-        let docker_compose_location = "/compose.yaml";
+        // Use Coolify-specific compose file which exposes port 80 without publishing it
+        let docker_compose_location = "/compose-coolify.yaml";
 
         // Get environment UUIDs
         let dev_env_uuid = self
@@ -790,10 +778,10 @@ impl ProjectOptions {
 
         // Create GitHub app application for dev environment
         cliclack::log::info("Creating GitHub app application for dev environment...")?;
-        let dev_env_vars = build_coolify_environment_variables("dev", "dev");
+        let mut dev_env_vars = build_coolify_environment_variables("dev", "dev");
 
         cliclack::log::warning(format!("destination_uuid: {:?}", destination_uuid.as_deref()))?;
-        match client.create_github_app_application(
+        let dev_app_uuid = match client.create_github_app_application(
             project_id,
             &server_uuid,
             "dev",
@@ -807,8 +795,9 @@ impl ProjectOptions {
             destination_uuid.as_deref(),
             &dev_env_vars,
         ) {
-            Ok(_) => {
+            Ok(uuid) => {
                 cliclack::log::success("GitHub app application created for dev environment")?;
+                uuid
             }
             Err(e) => {
                 log::warn!("Failed to create GitHub app application for dev: {}", e);
@@ -816,14 +805,15 @@ impl ProjectOptions {
                     "Failed to create GitHub app application for dev: {}",
                     e
                 ))?;
+                return Ok(());
             }
-        }
+        };
 
         // Create GitHub app application for prod environment
         cliclack::log::info("Creating GitHub app application for prod environment...")?;
-        let prod_env_vars = build_coolify_environment_variables("prod", "prod");
+        let mut prod_env_vars = build_coolify_environment_variables("prod", "prod");
 
-        match client.create_github_app_application(
+        let prod_app_uuid = match client.create_github_app_application(
             project_id,
             &server_uuid,
             "prod",
@@ -837,8 +827,9 @@ impl ProjectOptions {
             destination_uuid.as_deref(),
             &prod_env_vars,
         ) {
-            Ok(_) => {
+            Ok(uuid) => {
                 cliclack::log::success("GitHub app application created for prod environment")?;
+                uuid
             }
             Err(e) => {
                 log::warn!("Failed to create GitHub app application for prod: {}", e);
@@ -846,8 +837,18 @@ impl ProjectOptions {
                     "Failed to create GitHub app application for prod: {}",
                     e
                 ))?;
+                return Ok(());
             }
-        }
+        };
+
+        // After applications are created, read .env file from project root and sync to Coolify
+        // if let Err(e) = sync_project_env_with_coolify(&client, &self.path, &dev_app_uuid, &prod_app_uuid, &mut dev_env_vars, &mut prod_env_vars) {
+        //     log::warn!("Failed to sync .env to Coolify applications: {}", e);
+        //     cliclack::log::warning(&format!(
+        //         "Failed to sync .env to Coolify applications: {}",
+        //         e
+        //     ))?;
+        // }
 
         Ok(())
     }
@@ -995,4 +996,50 @@ fn build_coolify_environment_variables(
         ApplicationEnvironmentVariable::new("NCL_ENVIRONMENT", environment_name),
         ApplicationEnvironmentVariable::new("NCL_GIT_BRANCH", git_branch),
     ]
+}
+
+/// Reads the project's .env file and syncs all variables to the Coolify applications.
+fn sync_project_env_with_coolify(
+    client: &CoolifyClient,
+    project_path: &std::path::Path,
+    dev_app_uuid: &str,
+    prod_app_uuid: &str,
+    dev_env_vars: &mut Vec<ApplicationEnvironmentVariable>,
+    prod_env_vars: &mut Vec<ApplicationEnvironmentVariable>,
+) -> Result<()> {
+    use std::fs;
+
+    let env_path = project_path.join(".env");
+    if !env_path.exists() {
+        // Nothing to sync
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&env_path)
+        .with_context(|| format!("Failed to read .env file at {}", env_path.display()))?;
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let mut parts = line.splitn(2, '=');
+        let key = parts.next().unwrap().trim();
+        let value = parts.next().unwrap_or("").trim().to_string();
+
+        if key.is_empty() {
+            continue;
+        }
+
+        // Use Coolify defaults for env flags
+        let env_var = ApplicationEnvironmentVariable::with_coolify_defaults(key, value);
+        dev_env_vars.push(env_var.clone());
+        prod_env_vars.push(env_var);
+    }
+
+    client.set_application_envs(dev_app_uuid, dev_env_vars)?;
+    client.set_application_envs(prod_app_uuid, prod_env_vars)?;
+
+    Ok(())
 }

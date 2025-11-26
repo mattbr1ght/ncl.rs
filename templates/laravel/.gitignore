@@ -32,3 +32,5 @@ yarn-error.log
 !docker-compose.yaml
 !compose.yaml
 !compose.yml
+!docker/sail/*
+!vendor/laravel/sail/database/pgsql/create-testing-database.sql
