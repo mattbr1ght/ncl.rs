@@ -44,32 +44,6 @@ jobs:
       - name: Run Tests
         run: npm test || echo "No tests configured"
 
-      - name: Build and Push Docker Image
-        if: github.event_name == 'push'
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: ${{ github.event_name == 'push' }}
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}-${{ github.sha }}
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}-latest
-          secrets: |
-            "username=${{ secrets.REGISTRY_USER }}"
-            "password=${{ secrets.REGISTRY_TOKEN }}"
-
-      - name: Deploy to Coolify (Dev)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-        env:
-          WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_DEV }}
-        run: |
-          if [ -n "$WEBHOOK_URL" ]; then
-            curl -X POST "$WEBHOOK_URL" \
-              -H "Content-Type: application/json" \
-              -d '{"branch": "dev"}'
-          else
-            echo "COOLIFY_WEBHOOK_DEV not configured, skipping deployment"
-          fi
-
   deploy-prod:
     runs-on: ubuntu-latest
     needs: ci
@@ -91,16 +65,3 @@ jobs:
 
       - name: Run Tests (Fast)
         run: npm test || echo "No tests configured"
-
-      - name: Deploy to Coolify (Prod)
-        env:
-          WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_PROD }}
-        run: |
-          if [ -n "$WEBHOOK_URL" ]; then
-            curl -X POST "$WEBHOOK_URL" \
-              -H "Content-Type: application/json" \
-              -d '{"branch": "prod"}'
-          else
-            echo "COOLIFY_WEBHOOK_PROD not configured, skipping deployment"
-          fi
-

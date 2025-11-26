@@ -13,13 +13,12 @@ fn format_dependencies(deps: &[crate::modules::common::Dependency]) -> String {
 fn load_template_from_path(path: &std::path::Path) -> Result<Template> {
     let meta = std::fs::read_to_string(path.join("template.toml"))
         .context("Failed to read template.toml")?;
-    toml::from_str(&meta)
-        .context("Failed to parse template.toml")
+    toml::from_str(&meta).context("Failed to parse template.toml")
 }
 
 pub fn run() -> Result<()> {
     let cwd = std::env::current_dir()?;
-    
+
     if !is_valid_project_path(&cwd) {
         cliclack::outro("You are not in a valid project directory")?;
         return Ok(());

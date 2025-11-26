@@ -11,4 +11,3 @@ pub mod keyring;
 pub mod permissions;
 pub mod scaffold;
 pub mod templates;
-

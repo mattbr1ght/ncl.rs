@@ -26,3 +26,9 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+# Keep Docker setup tracked
+!Dockerfile
+!docker-compose.yml
+!docker-compose.yaml
+!compose.yaml
+!compose.yml
