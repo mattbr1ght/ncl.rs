@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use log::{debug, warn};
+use log::debug;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 

@@ -778,7 +778,7 @@ impl ProjectOptions {
 
         // Create GitHub app application for dev environment
         cliclack::log::info("Creating GitHub app application for dev environment...")?;
-        let mut dev_env_vars = build_coolify_environment_variables("dev", "dev");
+        let dev_env_vars = build_coolify_environment_variables("dev", "dev");
 
         cliclack::log::warning(format!("destination_uuid: {:?}", destination_uuid.as_deref()))?;
         let dev_app_uuid = match client.create_github_app_application(
@@ -811,7 +811,7 @@ impl ProjectOptions {
 
         // Create GitHub app application for prod environment
         cliclack::log::info("Creating GitHub app application for prod environment...")?;
-        let mut prod_env_vars = build_coolify_environment_variables("prod", "prod");
+        let prod_env_vars = build_coolify_environment_variables("prod", "prod");
 
         let prod_app_uuid = match client.create_github_app_application(
             project_id,
