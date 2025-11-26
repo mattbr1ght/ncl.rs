@@ -53,3 +53,10 @@ Suma godzin: 53
 - [ ] Refaktoryzacja i poprawki
 - [ ] Pakowanie i dystrybucja binarki
 
+
+- [ ] change environment variables for application resource in coolify environments like prod, dev
+- [ ] add a docker file and dockercompose dependency files to .gitignore to NOT ignore them in laravel template
+- [ ] try port mappings
+- [ ] fix ci/cd - remove deploy
+- [ ] add code sniffer
+

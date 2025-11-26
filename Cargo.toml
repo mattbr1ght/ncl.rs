@@ -15,7 +15,7 @@ grep = "0.4.0"
 grep-regex = "0.1.14"
 grep-searcher = "0.1.15"
 include_dir = "0.7.4"
-keyring = "3.6.3"
+keyring = { version = "2.3.3", default-features = false, features = ["platform-linux", "platform-macos", "platform-windows"], optional = true }
 log = "0.4"
 regex = "1.12.2"
 reqwest = { version = "0.12.24", features = ["blocking", "json"] }
@@ -29,3 +29,7 @@ toml = "0.9.8"
 walkdir = "2.5.0"
 which = "8.0.0"
 whoami = "1.6.1"
+
+[features]
+default = ["keyring-support"]
+keyring-support = ["dep:keyring"]

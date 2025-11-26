@@ -1,0 +1,13 @@
+services:
+    next-server:
+        build:
+            context: './'
+            dockerfile: Dockerfile
+        # Coolify-managed container: expose port 80 only (no published ports)
+        expose:
+            - '80'
+        environment:
+            # Ensure Next.js listens on port 80 inside the container
+            PORT: '80'
+
+

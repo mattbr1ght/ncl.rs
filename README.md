@@ -132,7 +132,30 @@ projekt-nazwa/
 ├─ README.md
 ```
 
-## 8. Przykładowa struktura projektu CLI
+## 8. Przykładowa struktura projektu CLI
+
+## 9. Przykładowy plik konfiguracyjny `~/.ncl/config.toml`
+
+```
+skip_github = false
+skip_trello = false
+skip_coolify = false
+
+[github]
+token = "ghp_xxx"
+owner = "my-org"
+repo_visibility = "private"
+
+[coolify]
+api_endpoint = "http://46.224.46.45:8000"
+token = "coolify_token"
+environment_prod_id = "abc123"
+environment_dev_id = "def456"
+
+[defaults]
+project_license = "MIT"
+project_type = "nextjs"
+```
 
 ```
 ncl/

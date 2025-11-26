@@ -14,4 +14,3 @@ pub fn missing_dependencies(template: &Template) -> Vec<Dependency> {
         .cloned()
         .collect()
 }
-

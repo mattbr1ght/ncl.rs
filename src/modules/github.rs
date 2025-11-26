@@ -31,7 +31,7 @@ pub struct CreateRepoResponse {
 pub fn fetch_organizations(token: &str) -> Result<Vec<GitHubOrganization>> {
     debug!("Fetching GitHub organizations");
     let client = reqwest::blocking::Client::new();
-    
+
     let response = client
         .get("https://api.github.com/user/orgs")
         .header("User-Agent", "NCL-CLI")
@@ -42,10 +42,14 @@ pub fn fetch_organizations(token: &str) -> Result<Vec<GitHubOrganization>> {
 
     if !response.status().is_success() {
         let error_text = response.text().unwrap_or_default();
-        return Err(anyhow::anyhow!("Failed to fetch organizations: {}", error_text));
+        return Err(anyhow::anyhow!(
+            "Failed to fetch organizations: {}",
+            error_text
+        ));
     }
 
-    let orgs: Vec<GitHubOrganization> = response.json()
+    let orgs: Vec<GitHubOrganization> = response
+        .json()
         .context("Failed to parse GitHub API response")?;
 
     debug!("Found {} organizations", orgs.len());
@@ -58,10 +62,14 @@ pub fn create_repository(
     owner: Option<&str>,
     request: &CreateRepoRequest,
 ) -> Result<CreateRepoResponse> {
-    debug!("Creating repository '{}' in {}", request.name, owner.unwrap_or("user"));
-    
+    debug!(
+        "Creating repository '{}' in {}",
+        request.name,
+        owner.unwrap_or("user")
+    );
+
     let client = reqwest::blocking::Client::new();
-    
+
     // Determine the API endpoint
     let url = if let Some(org) = owner {
         format!("https://api.github.com/orgs/{}/repos", org)
@@ -80,31 +88,36 @@ pub fn create_repository(
 
     if !response.status().is_success() {
         let error_text = response.text().unwrap_or_default();
-        return Err(anyhow::anyhow!("Failed to create repository: {}", error_text));
+        return Err(anyhow::anyhow!(
+            "Failed to create repository: {}",
+            error_text
+        ));
     }
 
-    let repo_response: CreateRepoResponse = response.json()
+    let repo_response: CreateRepoResponse = response
+        .json()
         .context("Failed to parse GitHub API response")?;
 
-    debug!("Successfully created repository: {}", repo_response.html_url);
+    debug!(
+        "Successfully created repository: {}",
+        repo_response.html_url
+    );
     Ok(repo_response)
 }
 
 /// Sets the default branch for a repository
-pub fn set_default_branch(
-    token: &str,
-    owner: &str,
-    repo: &str,
-    branch: &str,
-) -> Result<()> {
-    debug!("Setting default branch to '{}' for {}/{}", branch, owner, repo);
-    
+pub fn set_default_branch(token: &str, owner: &str, repo: &str, branch: &str) -> Result<()> {
+    debug!(
+        "Setting default branch to '{}' for {}/{}",
+        branch, owner, repo
+    );
+
     let client = reqwest::blocking::Client::new();
-    
+
     // First, we need to create the branch if it doesn't exist
     // Then update the default branch via PATCH /repos/{owner}/{repo}
     let url = format!("https://api.github.com/repos/{}/{}", owner, repo);
-    
+
     let response = client
         .patch(&url)
         .header("User-Agent", "NCL-CLI")
@@ -118,7 +131,10 @@ pub fn set_default_branch(
 
     if !response.status().is_success() {
         let error_text = response.text().unwrap_or_default();
-        return Err(anyhow::anyhow!("Failed to set default branch: {}", error_text));
+        return Err(anyhow::anyhow!(
+            "Failed to set default branch: {}",
+            error_text
+        ));
     }
 
     debug!("Successfully set default branch to '{}'", branch);
@@ -135,12 +151,18 @@ pub fn add_branch_protection(
     require_status_checks: bool,
     enforce_admins: bool,
 ) -> Result<()> {
-    debug!("Adding branch protection for '{}' in {}/{}", branch, owner, repo);
-    
+    debug!(
+        "Adding branch protection for '{}' in {}/{}",
+        branch, owner, repo
+    );
+
     let client = reqwest::blocking::Client::new();
-    
-    let url = format!("https://api.github.com/repos/{}/{}/branches/{}/protection", owner, repo, branch);
-    
+
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/branches/{}/protection",
+        owner, repo, branch
+    );
+
     let protection_rules = serde_json::json!({
         "required_status_checks": if require_status_checks {
             serde_json::json!({
@@ -164,7 +186,7 @@ pub fn add_branch_protection(
         "allow_force_pushes": false,
         "allow_deletions": false
     });
-    
+
     let response = client
         .put(&url)
         .header("User-Agent", "NCL-CLI")
@@ -176,44 +198,97 @@ pub fn add_branch_protection(
 
     if !response.status().is_success() {
         let error_text = response.text().unwrap_or_default();
-        return Err(anyhow::anyhow!("Failed to add branch protection: {}", error_text));
+        return Err(anyhow::anyhow!(
+            "Failed to add branch protection: {}",
+            error_text
+        ));
     }
 
     debug!("Successfully added branch protection for '{}'", branch);
     Ok(())
 }
 
-/// Enables GitHub Actions for a repository
-pub fn enable_github_actions(
-    token: &str,
-    owner: &str,
-    repo: &str,
-) -> Result<()> {
+/// Enables GitHub Actions for a repository.
+///
+/// This is a best-effort helper – many organizations enforce Actions/Workflow
+/// settings at the org level, so these calls may legitimately return 403/404.
+/// We treat those as non-fatal and only log them at debug level.
+pub fn enable_github_actions(token: &str, owner: &str, repo: &str) -> Result<()> {
     debug!("Enabling GitHub Actions for {}/{}", owner, repo);
-    
-    let client = reqwest::blocking::Client::new();
-    
-    // Enable Actions by setting actions permissions
-    let url = format!("https://api.github.com/repos/{}/{}/actions/permissions", owner, repo);
-    
-    let response = client
-        .put(&url)
-        .header("User-Agent", "NCL-CLI")
-        .header("Accept", "application/vnd.github.v3+json")
-        .bearer_auth(token)
-        .json(&serde_json::json!({
-            "enabled": true,
-            "allowed_actions": "all"
-        }))
-        .send()
-        .context("Failed to send request to GitHub API")?;
 
-    if !response.status().is_success() {
-        let error_text = response.text().unwrap_or_default();
-        // This might fail if Actions are already enabled or if user doesn't have permission
-        debug!("Failed to enable GitHub Actions (may already be enabled): {}", error_text);
-    } else {
-        debug!("Successfully enabled GitHub Actions");
+    let client = reqwest::blocking::Client::new();
+
+    // 1) Best-effort: repo-level Actions permissions
+    {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/permissions",
+            owner, repo
+        );
+
+        let response = client
+            .put(&url)
+            .header("User-Agent", "NCL-CLI")
+            .header("Accept", "application/vnd.github.v3+json")
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "enabled": true,
+                "allowed_actions": "all"
+            }))
+            .send()
+            .context("Failed to send request to GitHub API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().unwrap_or_default();
+            debug!(
+                "Failed to set Actions permissions for {}/{} (status {}): {} \
+                 (this is often expected if the org enforces settings)",
+                owner,
+                repo,
+                status,
+                error_text
+            );
+        } else {
+            debug!("Successfully set Actions permissions for {}/{}", owner, repo);
+        }
+    }
+
+    // 2) Best-effort: workflow permissions (needed on some orgs)
+    {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/permissions/workflow",
+            owner, repo
+        );
+
+        let response = client
+            .put(&url)
+            .header("User-Agent", "NCL-CLI")
+            .header("Accept", "application/vnd.github.v3+json")
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "can_approve_pull_request_reviews": true,
+                "default_workflow_permissions": "write"
+            }))
+            .send()
+            .context("Failed to send request to GitHub API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().unwrap_or_default();
+            debug!(
+                "Failed to set workflow permissions for {}/{} (status {}): {} \
+                 (this is often expected if the org enforces settings)",
+                owner,
+                repo,
+                status,
+                error_text
+            );
+        } else {
+            debug!(
+                "Successfully set workflow permissions for {}/{}",
+                owner, repo
+            );
+        }
     }
 
     Ok(())
@@ -228,11 +303,14 @@ pub fn create_or_update_secret(
     secret_value: &str,
 ) -> Result<()> {
     debug!("Setting secret '{}' for {}/{}", secret_name, owner, repo);
-    
+
     // First, get the public key for encryption
     let client = reqwest::blocking::Client::new();
-    let url = format!("https://api.github.com/repos/{}/{}/actions/secrets/public-key", owner, repo);
-    
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/actions/secrets/public-key",
+        owner, repo
+    );
+
     let response = client
         .get(&url)
         .header("User-Agent", "NCL-CLI")
@@ -252,44 +330,44 @@ pub fn create_or_update_secret(
         key: String,
     }
 
-    let public_key: PublicKeyResponse = response.json()
+    let public_key: PublicKeyResponse = response
+        .json()
         .context("Failed to parse public key response")?;
 
     // Encrypt the secret using libsodium (sodiumoxide)
     // GitHub requires secrets to be encrypted with their public key using libsodium
     sodiumoxide::init();
-    
+
     use base64::{Engine as _, engine::general_purpose};
     let public_key_bytes = general_purpose::STANDARD
         .decode(&public_key.key)
         .map_err(|e| anyhow::anyhow!("Failed to decode public key: {}", e))?;
-    
+
     if public_key_bytes.len() != sodiumoxide::crypto::box_::PUBLICKEYBYTES {
         return Err(anyhow::anyhow!("Invalid public key length"));
     }
-    
+
     let pk = sodiumoxide::crypto::box_::PublicKey::from_slice(&public_key_bytes)
         .ok_or_else(|| anyhow::anyhow!("Failed to create public key"))?;
-    
+
     // Generate a nonce for box encryption
     let nonce = sodiumoxide::crypto::box_::gen_nonce();
-    
+
     // Generate ephemeral keypair for box encryption
     let (_ephemeral_pk, ephemeral_sk) = sodiumoxide::crypto::box_::gen_keypair();
-    
+
     // Encrypt using libsodium box (GitHub's required method)
-    let encrypted = sodiumoxide::crypto::box_::seal(
-        secret_value.as_bytes(),
-        &nonce,
-        &pk,
-        &ephemeral_sk,
-    );
-    
+    let encrypted =
+        sodiumoxide::crypto::box_::seal(secret_value.as_bytes(), &nonce, &pk, &ephemeral_sk);
+
     let encrypted_value = general_purpose::STANDARD.encode(&encrypted);
-    
+
     // Create the secret
-    let secret_url = format!("https://api.github.com/repos/{}/{}/actions/secrets/{}", owner, repo, secret_name);
-    
+    let secret_url = format!(
+        "https://api.github.com/repos/{}/{}/actions/secrets/{}",
+        owner, repo, secret_name
+    );
+
     let response = client
         .put(&secret_url)
         .header("User-Agent", "NCL-CLI")
@@ -304,7 +382,11 @@ pub fn create_or_update_secret(
 
     if !response.status().is_success() {
         let error_text = response.text().unwrap_or_default();
-        return Err(anyhow::anyhow!("Failed to create secret '{}': {}", secret_name, error_text));
+        return Err(anyhow::anyhow!(
+            "Failed to create secret '{}': {}",
+            secret_name,
+            error_text
+        ));
     }
 
     debug!("Successfully set secret '{}'", secret_name);
@@ -318,11 +400,17 @@ pub fn create_deployment_environment(
     repo: &str,
     environment: &str,
 ) -> Result<()> {
-    debug!("Creating deployment environment '{}' for {}/{}", environment, owner, repo);
-    
+    debug!(
+        "Creating deployment environment '{}' for {}/{}",
+        environment, owner, repo
+    );
+
     let client = reqwest::blocking::Client::new();
-    let url = format!("https://api.github.com/repos/{}/{}/environments/{}", owner, repo, environment);
-    
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/environments/{}",
+        owner, repo, environment
+    );
+
     let response = client
         .put(&url)
         .header("User-Agent", "NCL-CLI")
@@ -340,26 +428,28 @@ pub fn create_deployment_environment(
         let error_text = response.text().unwrap_or_default();
         // Environment might already exist, which is fine
         if !error_text.contains("already exists") {
-            debug!("Failed to create environment (may already exist): {}", error_text);
+            debug!(
+                "Failed to create environment (may already exist): {}",
+                error_text
+            );
         }
     } else {
-        debug!("Successfully created deployment environment '{}'", environment);
+        debug!(
+            "Successfully created deployment environment '{}'",
+            environment
+        );
     }
 
     Ok(())
 }
 
 /// Deletes a GitHub repository
-pub fn delete_repository(
-    token: &str,
-    owner: &str,
-    repo: &str,
-) -> Result<()> {
+pub fn delete_repository(token: &str, owner: &str, repo: &str) -> Result<()> {
     debug!("Deleting repository {}/{}", owner, repo);
-    
+
     let client = reqwest::blocking::Client::new();
     let url = format!("https://api.github.com/repos/{}/{}", owner, repo);
-    
+
     let response = client
         .delete(&url)
         .header("User-Agent", "NCL-CLI")
@@ -370,7 +460,10 @@ pub fn delete_repository(
 
     if !response.status().is_success() {
         let error_text = response.text().unwrap_or_default();
-        return Err(anyhow::anyhow!("Failed to delete repository: {}", error_text));
+        return Err(anyhow::anyhow!(
+            "Failed to delete repository: {}",
+            error_text
+        ));
     }
 
     debug!("Successfully deleted repository");
@@ -385,14 +478,14 @@ pub fn prompt_organization_selection(orgs: &[GitHubOrganization]) -> Result<Opti
     }
 
     let mut selector = cliclack::select("Select an organization:");
-    
+
     for org in orgs {
         selector = selector.item(org.login.clone(), org.login.clone(), "");
     }
-    
-    let selected = selector.interact()
+
+    let selected = selector
+        .interact()
         .map_err(|e| anyhow::anyhow!("Selection error: {}", e))?;
 
     Ok(Some(selected))
 }
-

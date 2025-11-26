@@ -1,20 +1,27 @@
 use console::style;
 use grep_regex::RegexMatcher;
-use grep_searcher::{sinks::UTF8, SearcherBuilder};
+use grep_searcher::{SearcherBuilder, sinks::UTF8};
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::Path;
-use terminal_size::{terminal_size, Width};
+use terminal_size::{Width, terminal_size};
 use walkdir::{DirEntry, WalkDir};
 
 const IGNORED_DIRS: &[&str] = &[
-    "node_modules", ".git", "target", ".idea", ".vscode", ".next", ".data", "vendor"
+    "node_modules",
+    ".git",
+    "target",
+    ".idea",
+    ".vscode",
+    ".next",
+    ".data",
+    "vendor",
 ];
 
 const DEFAULT_QUERY: &str = "TODO";
 
 fn is_ignored(entry: &DirEntry) -> bool {
-    entry.file_type().is_dir() 
+    entry.file_type().is_dir()
         && IGNORED_DIRS.contains(&entry.file_name().to_string_lossy().as_ref())
 }
 
@@ -42,7 +49,7 @@ fn search_file(
     max_width: usize,
 ) -> std::io::Result<Vec<(u64, String)>> {
     let mut matches = Vec::new();
-    
+
     searcher.search_path(
         matcher,
         path,
@@ -52,27 +59,33 @@ fn search_file(
             Ok(true)
         }),
     )?;
-    
+
     Ok(matches)
 }
 
 fn highlight_matches(text: &str, pattern: &Regex) -> String {
-    pattern.replace_all(text, |caps: &regex::Captures| {
-        style(&caps[0]).red().bold().to_string()
-    }).to_string()
+    pattern
+        .replace_all(text, |caps: &regex::Captures| {
+            style(&caps[0]).red().bold().to_string()
+        })
+        .to_string()
 }
 
-fn collect_matches(root: &Path, query: &str) -> std::io::Result<HashMap<String, Vec<(u64, String)>>> {
-    let matcher = RegexMatcher::new(query)
-        .map_err(|e| std::io::Error::new(
+fn collect_matches(
+    root: &Path,
+    query: &str,
+) -> std::io::Result<HashMap<String, Vec<(u64, String)>>> {
+    let matcher = RegexMatcher::new(query).map_err(|e| {
+        std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("Invalid regex pattern: {}", e)
-        ))?;
-    
+            format!("Invalid regex pattern: {}", e),
+        )
+    })?;
+
     let mut searcher = SearcherBuilder::new()
         .binary_detection(grep_searcher::BinaryDetection::quit(b'\x00'))
         .build();
-    
+
     let max_width = get_terminal_width().saturating_sub(10);
     let mut all_matches = HashMap::new();
 
@@ -84,10 +97,7 @@ fn collect_matches(root: &Path, query: &str) -> std::io::Result<HashMap<String, 
     {
         if let Ok(file_matches) = search_file(entry.path(), &matcher, &mut searcher, max_width) {
             if !file_matches.is_empty() {
-                all_matches.insert(
-                    entry.path().to_string_lossy().to_string(),
-                    file_matches,
-                );
+                all_matches.insert(entry.path().to_string_lossy().to_string(), file_matches);
             }
         }
     }
@@ -97,7 +107,7 @@ fn collect_matches(root: &Path, query: &str) -> std::io::Result<HashMap<String, 
 
 fn display_matches(matches: HashMap<String, Vec<(u64, String)>>, query: &str) {
     let pattern = Regex::new(query).unwrap();
-    
+
     for (path, lines) in matches {
         println!("{}", style(path).cyan());
         for (line_num, text) in lines {

@@ -3,19 +3,16 @@ use log::debug;
 use std::path::Path;
 
 /// Generates GitHub Actions CI/CD workflow for dev and prod branches
-pub fn generate_cicd_workflow(
-    project_path: &Path,
-    template_name: &str,
-) -> Result<()> {
+pub fn generate_cicd_workflow(project_path: &Path, template_name: &str) -> Result<()> {
     debug!("Generating CI/CD workflow for template: {}", template_name);
-    
+
     let workflows_dir = project_path.join(".github").join("workflows");
     std::fs::create_dir_all(&workflows_dir)
         .context("Failed to create .github/workflows directory")?;
 
     // Generate workflow that triggers on PR to dev and merge to prod
     let workflow_content = generate_workflow_yaml(template_name);
-    
+
     let workflow_file = workflows_dir.join("ci.yml");
     std::fs::write(&workflow_file, workflow_content)
         .context("Failed to write CI/CD workflow file")?;
@@ -86,18 +83,6 @@ fn generate_laravel_steps() -> &'static str {
 
       - name: Run Tests
         run: ./vendor/bin/pest || echo "No tests configured"
-
-      - name: Deploy to Coolify (Dev)
-        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
-        uses: ./.github/actions/coolify-deploy
-        with:
-          environment: dev
-
-      - name: Deploy to Coolify (Prod)
-        if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-        uses: ./.github/actions/coolify-deploy
-        with:
-          environment: prod
 "#
 }
 
@@ -116,18 +101,6 @@ fn generate_nextjs_steps() -> &'static str {
 
       - name: Run Tests
         run: npm test || echo "No tests configured"
-
-      - name: Deploy to Coolify (Dev)
-        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
-        uses: ./.github/actions/coolify-deploy
-        with:
-          environment: dev
-
-      - name: Deploy to Coolify (Prod)
-        if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-        uses: ./.github/actions/coolify-deploy
-        with:
-          environment: prod
 "#
 }
 
@@ -146,67 +119,11 @@ fn generate_react_native_steps() -> &'static str {
 
       - name: Run Tests
         run: npm test || echo "No tests configured"
-
-      - name: Deploy to Coolify (Dev)
-        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
-        uses: ./.github/actions/coolify-deploy
-        with:
-          environment: dev
-
-      - name: Deploy to Coolify (Prod)
-        if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-        uses: ./.github/actions/coolify-deploy
-        with:
-          environment: prod
 "#
 }
 
 fn generate_generic_steps() -> &'static str {
     r#"      - name: Build
         run: echo "Add your build commands here"
-
-      - name: Deploy to Coolify (Dev)
-        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
-        uses: ./.github/actions/coolify-deploy
-        with:
-          environment: dev
-
-      - name: Deploy to Coolify (Prod)
-        if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-        uses: ./.github/actions/coolify-deploy
-        with:
-          environment: prod
 "#
 }
-
-/// Generates a Coolify deployment action (simplified - will be called via API)
-pub fn generate_coolify_action(project_path: &Path) -> Result<()> {
-    debug!("Generating Coolify deployment action");
-    
-    let actions_dir = project_path.join(".github").join("actions").join("coolify-deploy");
-    std::fs::create_dir_all(&actions_dir)
-        .context("Failed to create .github/actions/coolify-deploy directory")?;
-
-    let action_yaml = r#"name: 'Coolify Deploy'
-description: 'Deploy to Coolify'
-inputs:
-  environment:
-    description: 'Environment to deploy to (dev/prod)'
-    required: true
-runs:
-  using: 'composite'
-  steps:
-    - name: Deploy to Coolify
-      shell: bash
-      run: |
-        echo "Deploying to Coolify ${{ inputs.environment }} environment"
-        # Coolify deployment will be handled via API call
-"#;
-
-    let action_file = actions_dir.join("action.yml");
-    std::fs::write(&action_file, action_yaml)
-        .context("Failed to write Coolify action file")?;
-
-    Ok(())
-}
-

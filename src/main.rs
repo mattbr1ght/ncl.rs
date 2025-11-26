@@ -59,13 +59,15 @@ fn init_logging(verbose: bool) {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     init_logging(cli.verbose);
 
     match &cli.command {
-        Some(Commands::Init { skip_github, skip_coolify, skip_trello }) => {
-            commands::init::run(*skip_github, *skip_coolify, *skip_trello)
-        }
+        Some(Commands::Init {
+            skip_github,
+            skip_coolify,
+            skip_trello,
+        }) => commands::init::run(*skip_github, *skip_coolify, *skip_trello),
         Some(Commands::Check) => commands::check::run(),
         Some(Commands::Run { job }) => commands::run::run(job.clone()),
         Some(Commands::Task) => commands::task::run(),

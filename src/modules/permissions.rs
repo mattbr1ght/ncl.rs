@@ -24,26 +24,31 @@ pub fn fix_file_ownership(path: &Path) -> Result<()> {
                 return Ok(());
             }
         };
-        
-        debug!("Fixing ownership for {} (uid: {}, gid: {})", path.display(), uid, gid);
-        
+
+        debug!(
+            "Fixing ownership for {} (uid: {}, gid: {})",
+            path.display(),
+            uid,
+            gid
+        );
+
         // Try chown with numeric UID:GID first (more reliable)
         let output = Command::new("chown")
             .arg("-R")
             .arg(format!("{}:{}", uid, gid))
             .arg(path)
             .output();
-        
+
         match output {
             Ok(output) if output.status.success() => {
                 debug!("Successfully fixed file ownership");
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                // If chown fails due to permission denied (root-owned files), 
+                // If chown fails due to permission denied (root-owned files),
                 // try with username as fallback, but don't fail
                 debug!("chown with UID:GID failed: {}", stderr);
-                
+
                 // Try with username as fallback
                 let username = whoami::username();
                 if let Ok(output) = Command::new("chown")
@@ -55,27 +60,33 @@ pub fn fix_file_ownership(path: &Path) -> Result<()> {
                     if !output.status.success() {
                         let stderr = String::from_utf8_lossy(&output.stderr);
                         debug!("chown with username also failed: {}", stderr);
-                        debug!("Note: Some files may be root-owned. You may need to run: sudo chown -R $USER:$USER {}", path.display());
+                        debug!(
+                            "Note: Some files may be root-owned. You may need to run: sudo chown -R $USER:$USER {}",
+                            path.display()
+                        );
                     }
                 }
             }
             Err(e) => {
                 debug!("Failed to execute chown: {}", e);
-                debug!("Note: Some files may be root-owned. You may need to run: sudo chown -R $USER:$USER {}", path.display());
+                debug!(
+                    "Note: Some files may be root-owned. You may need to run: sudo chown -R $USER:$USER {}",
+                    path.display()
+                );
             }
         }
-        
+
         // Also ensure files are writable (this should always work for files we own)
         fix_file_permissions(path)?;
     }
-    
+
     #[cfg(windows)]
     {
         // On Windows, we just ensure files are writable
         // Ownership is less of an issue on Windows
         fix_file_permissions(path)?;
     }
-    
+
     Ok(())
 }
 
@@ -105,14 +116,14 @@ fn fix_file_permissions(path: &Path) -> Result<()> {
     {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
-        
+
         for entry in walkdir::WalkDir::new(path) {
             let entry = entry?;
             let path = entry.path();
-            
+
             if let Ok(metadata) = fs::metadata(path) {
                 let mut perms = metadata.permissions();
-                
+
                 if path.is_file() {
                     // Set to rw-rw-r-- (664) for files
                     perms.set_mode(0o664);
@@ -120,7 +131,7 @@ fn fix_file_permissions(path: &Path) -> Result<()> {
                     // Set to rwxrwxr-x (775) for directories
                     perms.set_mode(0o775);
                 }
-                
+
                 if fs::set_permissions(path, perms).is_err() {
                     debug!("Failed to set permissions for {}", path.display());
                     // Continue - don't fail on permission errors
@@ -128,14 +139,14 @@ fn fix_file_permissions(path: &Path) -> Result<()> {
             }
         }
     }
-    
+
     #[cfg(windows)]
     {
         // On Windows, ensure files are not read-only
         for entry in walkdir::WalkDir::new(path) {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.is_file() {
                 if let Ok(mut perms) = std::fs::metadata(path).map(|m| m.permissions()) {
                     perms.set_readonly(false);
@@ -147,7 +158,6 @@ fn fix_file_permissions(path: &Path) -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }
-

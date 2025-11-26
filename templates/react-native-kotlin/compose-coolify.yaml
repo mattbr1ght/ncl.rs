@@ -1,0 +1,13 @@
+services:
+    react-native-server:
+        build:
+            context: './'
+            dockerfile: Dockerfile
+        # Coolify-managed container: expose port 80 only (no published ports)
+        expose:
+            - '80'
+        environment:
+            # Ensure the app listens on port 80 inside the container
+            APP_PORT: '80'
+
+
