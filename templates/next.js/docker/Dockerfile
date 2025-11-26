@@ -1,0 +1,10 @@
+FROM node:latest
+WORKDIR /usr/src/app
+COPY . .
+
+RUN npm install && npm run build 
+
+ENV PORT=80
+EXPOSE 80
+
+ENTRYPOINT [ "npm", "run", "dev" ] 
