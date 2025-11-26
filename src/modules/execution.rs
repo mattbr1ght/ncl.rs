@@ -22,8 +22,6 @@ pub struct CommandSpec {
     pub command: String,
     /// Where to execute the command
     pub context: ExecutionContext,
-    /// Working directory (relative to project root)
-    pub working_dir: Option<String>,
 }
 
 /// Execute a single command
@@ -384,67 +382,6 @@ fn execute_docker_command(
     }
 }
 
-/// Start all Docker Compose services for a project
-pub fn start_all_services(project_path: &Path) -> Result<Output> {
-    let compose_file = find_compose_file(project_path);
-    let project_name = get_project_name(project_path);
-
-    let Some(compose_path) = compose_file else {
-        return Err(anyhow::anyhow!(
-            "No compose.yaml or docker-compose.yml found in project"
-        ));
-    };
-
-    check_docker_permissions()?;
-    let compose_cmd = get_compose_command()?;
-    let mut command = Command::new(compose_cmd);
-    if compose_cmd == "docker" {
-        command.arg("compose");
-    }
-
-    command
-        .arg("-p")
-        .arg(&project_name)
-        .arg("-f")
-        .arg(compose_path)
-        .arg("up")
-        .arg("-d")
-        .current_dir(project_path)
-        .env("COMPOSE_PROJECT_NAME", &project_name)
-        .output()
-        .with_context(|| format!("Failed to start services for project: {}", project_name))
-}
-
-/// Stop all Docker Compose services for a project
-pub fn stop_all_services(project_path: &Path) -> Result<Output> {
-    let compose_file = find_compose_file(project_path);
-    let project_name = get_project_name(project_path);
-
-    let Some(compose_path) = compose_file else {
-        return Err(anyhow::anyhow!(
-            "No compose.yaml or docker-compose.yml found in project"
-        ));
-    };
-
-    check_docker_permissions()?;
-    let compose_cmd = get_compose_command()?;
-    let mut command = Command::new(compose_cmd);
-    if compose_cmd == "docker" {
-        command.arg("compose");
-    }
-
-    command
-        .arg("-p")
-        .arg(&project_name)
-        .arg("-f")
-        .arg(compose_path)
-        .arg("down")
-        .current_dir(project_path)
-        .env("COMPOSE_PROJECT_NAME", &project_name)
-        .output()
-        .with_context(|| format!("Failed to stop services for project: {}", project_name))
-}
-
 /// Parse a command string into a CommandSpec
 /// Supports syntax:
 /// - "command" - runs on host
@@ -466,7 +403,6 @@ pub fn parse_command(cmd: &str) -> CommandSpec {
         return CommandSpec {
             command: cmd.to_string(),
             context: ExecutionContext::Host,
-            working_dir: None,
         };
     }
 
@@ -478,7 +414,6 @@ pub fn parse_command(cmd: &str) -> CommandSpec {
                     container: target.to_string(),
                     service: Some(target.to_string()),
                 },
-                working_dir: None,
             }
         } else {
             // docker:command - use default container
@@ -488,14 +423,12 @@ pub fn parse_command(cmd: &str) -> CommandSpec {
                     container: "app".to_string(),
                     service: Some("app".to_string()),
                 },
-                working_dir: None,
             }
         }
     } else {
         CommandSpec {
             command: cmd.to_string(),
             context: ExecutionContext::Host,
-            working_dir: None,
         }
     }
 }

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use anyhow::anyhow;
 use log::debug;
 use std::path::Path;
 use std::process::Command;
@@ -58,12 +59,15 @@ pub fn fix_file_ownership(path: &Path) -> Result<()> {
                     .output()
                 {
                     if !output.status.success() {
+                        use anyhow::anyhow;
+
                         let stderr = String::from_utf8_lossy(&output.stderr);
                         debug!("chown with username also failed: {}", stderr);
                         debug!(
                             "Note: Some files may be root-owned. You may need to run: sudo chown -R $USER:$USER {}",
                             path.display()
                         );
+                        return Err(anyhow!("Chown with username failed"));
                     }
                 }
             }
@@ -73,6 +77,7 @@ pub fn fix_file_ownership(path: &Path) -> Result<()> {
                     "Note: Some files may be root-owned. You may need to run: sudo chown -R $USER:$USER {}",
                     path.display()
                 );
+                return Err(anyhow!("Chown failed"));
             }
         }
 

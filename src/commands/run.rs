@@ -37,6 +37,7 @@ pub fn run(job: Option<String>) -> Result<()> {
     let mut template: Template = toml::from_str(&meta).context("Failed to parse template.toml")?;
     template.path = project_root.clone();
 
+    template.hooks.insert("remove-project".to_string(), vec!["Removes the project from coolify and github".to_string()]);
     if template.hooks.is_empty() {
         cliclack::outro("No hooks defined in template.toml")?;
         return Ok(());

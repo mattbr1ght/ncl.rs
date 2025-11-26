@@ -3,16 +3,16 @@ use log::debug;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::process::exit;
 
 use crate::modules::common::Installable;
 use crate::modules::config::{NclConfig, ProjectConfig};
 use crate::modules::coolify::{
-    ApplicationEnvironmentVariable, CoolifyClient, prompt_coolify_config, prompt_coolify_setup,
+    CoolifyClient, prompt_coolify_config, prompt_coolify_setup,
     prompt_destination_selection, prompt_github_app_selection, prompt_server_selection,
 };
 use crate::modules::git;
 use crate::modules::github::{self, CreateRepoRequest};
-use crate::modules::keyring::{Keyring, accounts};
 use crate::modules::permissions::fix_file_ownership;
 use crate::modules::templates::{Template, load_universal_base, run_hook};
 
@@ -110,7 +110,7 @@ impl ProjectOptions {
 
         // Setup GitHub integration (create repo, set dev as default, add protection)
         if !self.config.skip_github {
-            match self.setup_github_integration(&mut repo, &mut project_config, setup_coolify) {
+            match self.setup_github_integration(&mut repo, &mut project_config) {
                 Ok(()) => {
                     rollback_state.github_repo_owner = project_config.github_repo_owner.clone();
                     rollback_state.github_repo_name = project_config.github_repo_name.clone();
@@ -187,10 +187,6 @@ impl ProjectOptions {
                 }
             }
         }
-
-        // Clean up keyring entries (project-specific)
-        let project_key = format!("{}_{}", self.name, accounts::COOLIFY_TOKEN);
-        let _ = Keyring::delete(&project_key);
 
         // Delete .ncl/config.toml if it exists
         let config_path = self.path.join(".ncl").join("config.toml");
@@ -282,7 +278,6 @@ impl ProjectOptions {
         &mut self,
         repo: &mut git2::Repository,
         project_config: &mut ProjectConfig,
-        has_coolify: bool,
     ) -> Result<()> {
         debug!("Setting up GitHub integration");
 
@@ -360,75 +355,8 @@ impl ProjectOptions {
         // Set dev as default branch on GitHub
         github::set_default_branch(&token, &owner, &self.name, "dev")?;
 
-        // // Add branch protection rules
-        // // Protect prod: require PR, require status checks, no direct pushes
-        // github::add_branch_protection(&token, &owner, &self.name, "prod", true, true, true)?;
-        //
-        // // Protect dev: optional stricter rules (require status checks, but PR optional)
-        // github::add_branch_protection(&token, &owner, &self.name, "dev", false, true, false)?;
-
         // Enable GitHub Actions
         github::enable_github_actions(&token, &owner, &self.name)?;
-
-        // Create deployment environments
-        // github::create_deployment_environment(&token, &owner, &self.name, "development")?;
-        // github::create_deployment_environment(&token, &owner, &self.name, "production")?;
-
-        // Set up GitHub secrets if Coolify is configured
-        // if has_coolify {
-        //     if let Some(coolify_token) = project_config
-        //         .coolify
-        //         .api_endpoint
-        //         .as_ref()
-        //         .and_then(|_| self.config.get_coolify_token().ok().flatten())
-        //     {
-        //         github::create_or_update_secret(
-        //             &token,
-        //             &owner,
-        //             &self.name,
-        //             "COOLIFY_TOKEN",
-        //             &coolify_token,
-        //         )?;
-        //     }
-        //
-        //     if let Some(webhook_dev) = &project_config.coolify.webhook_dev {
-        //         github::create_or_update_secret(
-        //             &token,
-        //             &owner,
-        //             &self.name,
-        //             "COOLIFY_WEBHOOK_DEV",
-        //             webhook_dev,
-        //         )?;
-        //     }
-        //
-        //     if let Some(webhook_prod) = &project_config.coolify.webhook_prod {
-        //         github::create_or_update_secret(
-        //             &token,
-        //             &owner,
-        //             &self.name,
-        //             "COOLIFY_WEBHOOK_PROD",
-        //             webhook_prod,
-        //         )?;
-        //     }
-        // }
-
-        // Set up registry secrets if configured
-        // if let Ok(Some((registry_user, registry_token))) = self.config.get_registry_credentials() {
-        //     github::create_or_update_secret(
-        //         &token,
-        //         &owner,
-        //         &self.name,
-        //         "REGISTRY_USER",
-        //         &registry_user,
-        //     )?;
-        //     github::create_or_update_secret(
-        //         &token,
-        //         &owner,
-        //         &self.name,
-        //         "REGISTRY_TOKEN",
-        //         &registry_token,
-        //     )?;
-        // }
 
         // Optional branch protection
         let enable_protection =
@@ -778,10 +706,9 @@ impl ProjectOptions {
 
         // Create GitHub app application for dev environment
         cliclack::log::info("Creating GitHub app application for dev environment...")?;
-        let mut dev_env_vars = build_coolify_environment_variables("dev", "dev");
 
         cliclack::log::warning(format!("destination_uuid: {:?}", destination_uuid.as_deref()))?;
-        let dev_app_uuid = match client.create_github_app_application(
+        let _dev_app_uuid = match client.create_github_app_application(
             project_id,
             &server_uuid,
             "dev",
@@ -793,7 +720,6 @@ impl ProjectOptions {
             docker_compose_location,
             &ports_exposes,
             destination_uuid.as_deref(),
-            &dev_env_vars,
         ) {
             Ok(uuid) => {
                 cliclack::log::success("GitHub app application created for dev environment")?;
@@ -811,9 +737,8 @@ impl ProjectOptions {
 
         // Create GitHub app application for prod environment
         cliclack::log::info("Creating GitHub app application for prod environment...")?;
-        let mut prod_env_vars = build_coolify_environment_variables("prod", "prod");
 
-        let prod_app_uuid = match client.create_github_app_application(
+        let _prod_app_uuid = match client.create_github_app_application(
             project_id,
             &server_uuid,
             "prod",
@@ -825,7 +750,6 @@ impl ProjectOptions {
             docker_compose_location,
             &ports_exposes,
             destination_uuid.as_deref(),
-            &prod_env_vars,
         ) {
             Ok(uuid) => {
                 cliclack::log::success("GitHub app application created for prod environment")?;
@@ -840,15 +764,6 @@ impl ProjectOptions {
                 return Ok(());
             }
         };
-
-        // After applications are created, read .env file from project root and sync to Coolify
-        // if let Err(e) = sync_project_env_with_coolify(&client, &self.path, &dev_app_uuid, &prod_app_uuid, &mut dev_env_vars, &mut prod_env_vars) {
-        //     log::warn!("Failed to sync .env to Coolify applications: {}", e);
-        //     cliclack::log::warning(&format!(
-        //         "Failed to sync .env to Coolify applications: {}",
-        //         e
-        //     ))?;
-        // }
 
         Ok(())
     }
@@ -980,66 +895,4 @@ fn ask_for_github_token() -> String {
         })
         .interact()
         .unwrap_or_default()
-}
-
-fn build_coolify_environment_variables(
-    environment_name: &str,
-    git_branch: &str,
-) -> Vec<ApplicationEnvironmentVariable> {
-    let normalized_app_env = match environment_name {
-        "prod" | "production" => "production",
-        _ => "development",
-    };
-
-    vec![
-        ApplicationEnvironmentVariable::new("APP_ENV", normalized_app_env),
-        ApplicationEnvironmentVariable::new("NCL_ENVIRONMENT", environment_name),
-        ApplicationEnvironmentVariable::new("NCL_GIT_BRANCH", git_branch),
-    ]
-}
-
-/// Reads the project's .env file and syncs all variables to the Coolify applications.
-fn sync_project_env_with_coolify(
-    client: &CoolifyClient,
-    project_path: &std::path::Path,
-    dev_app_uuid: &str,
-    prod_app_uuid: &str,
-    dev_env_vars: &mut Vec<ApplicationEnvironmentVariable>,
-    prod_env_vars: &mut Vec<ApplicationEnvironmentVariable>,
-) -> Result<()> {
-    use std::fs;
-
-    let env_path = project_path.join(".env");
-    if !env_path.exists() {
-        // Nothing to sync
-        return Ok(());
-    }
-
-    let content = fs::read_to_string(&env_path)
-        .with_context(|| format!("Failed to read .env file at {}", env_path.display()))?;
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        let mut parts = line.splitn(2, '=');
-        let key = parts.next().unwrap().trim();
-        let value = parts.next().unwrap_or("").trim().to_string();
-
-        if key.is_empty() {
-            continue;
-        }
-
-        // Use Coolify defaults for env flags
-        let env_var = ApplicationEnvironmentVariable::with_coolify_defaults(key, value);
-        dev_env_vars.push(env_var.clone());
-        prod_env_vars.push(env_var);
-    }
-
-    client.set_application_envs(dev_app_uuid, dev_env_vars)?;
-    client.set_application_envs(prod_app_uuid, prod_env_vars)?;
-
-    Ok(())
 }

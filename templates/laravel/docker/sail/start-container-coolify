@@ -18,7 +18,6 @@ chown -R sail:sail storage && echo "Fixed storage permissions"
 chown -R sail:sail bootstrap/cache && echo "Fixed bootstrap/cache permissions"
 
 cd /var/www/html && php artisan migrate
-cd /var/www/html && npm run dev &
 
 if [ $# -gt 0 ]; then
     if [ "$SUPERVISOR_PHP_USER" = "root" ]; then

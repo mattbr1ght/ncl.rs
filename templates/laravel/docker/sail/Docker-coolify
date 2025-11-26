@@ -8,9 +8,10 @@ RUN rm /bin/sh && ln -s /bin/bash /bin/sh
 # RUN /bin/bash -c "source .env" && composer install --no-dev --optimize-autoloader
 RUN composer install --no-dev --optimize-autoloader
 RUN npm install && npm run build
+COPY .env.coolify .env
 RUN php artisan key:generate && php artisan storage:link
 
-COPY ./docker/sail/start-container /usr/local/bin/start-container
+COPY ./docker/sail/start-container-coolify /usr/local/bin/start-container
 COPY ./docker/sail/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY ./docker/sail/php.ini /etc/php/8.4/cli/conf.d/99-sail.ini
 RUN chmod +x /usr/local/bin/start-container

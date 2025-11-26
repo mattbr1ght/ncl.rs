@@ -5,6 +5,7 @@ COPY . .
 RUN npm install
 
 ENV PORT=80
+ENV APP_PORT=80
 EXPOSE 80
 
-CMD [ "npm", "start" ] 
+ENTRYPOINT [ "npm", "start", "--", "--port", "80" ] 

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use git2::{BranchType, Repository, Signature};
+use git2::{Repository, Signature};
 use log::debug;
 use std::path::Path;
 
@@ -148,24 +148,6 @@ pub fn push_to_remote(
     Ok(())
 }
 
-/// Sets the upstream branch for the current branch
-pub fn set_upstream_branch(repo: &Repository, branch_name: &str, remote_name: &str) -> Result<()> {
-    debug!(
-        "Setting upstream for branch '{}' to '{}/{}'",
-        branch_name, remote_name, branch_name
-    );
-
-    let mut branch = repo
-        .find_branch(branch_name, BranchType::Local)
-        .with_context(|| format!("Failed to find branch '{}'", branch_name))?;
-
-    let upstream_name = format!("{}/{}", remote_name, branch_name);
-    branch
-        .set_upstream(Some(&upstream_name))
-        .with_context(|| format!("Failed to set upstream for branch '{}'", branch_name))?;
-
-    Ok(())
-}
 
 /// Gets the signature for commits (user name and email)
 pub fn get_signature(repo: &Repository) -> Result<Signature<'static>> {
@@ -183,37 +165,3 @@ pub fn get_signature(repo: &Repository) -> Result<Signature<'static>> {
     Signature::now(&name, &email).context("Failed to create signature")
 }
 
-/// Checks out a branch
-pub fn checkout_branch(repo: &Repository, branch_name: &str) -> Result<()> {
-    debug!("Checking out branch: {}", branch_name);
-
-    let (object, reference) = repo
-        .revparse_ext(branch_name)
-        .with_context(|| format!("Failed to parse branch '{}'", branch_name))?;
-
-    repo.checkout_tree(&object, None)
-        .with_context(|| format!("Failed to checkout tree for branch '{}'", branch_name))?;
-
-    match reference {
-        Some(ref r) => {
-            repo.set_head(r.name().unwrap())
-                .with_context(|| format!("Failed to set HEAD to '{}'", branch_name))?;
-        }
-        None => {
-            // Create a new branch reference
-            repo.reference(
-                &format!("refs/heads/{}", branch_name),
-                object.id(),
-                true,
-                "checkout branch",
-            )
-            .with_context(|| format!("Failed to create branch reference '{}'", branch_name))?;
-
-            repo.set_head(&format!("refs/heads/{}", branch_name))
-                .with_context(|| format!("Failed to set HEAD to '{}'", branch_name))?;
-        }
-    }
-
-    debug!("Checked out branch: {}", branch_name);
-    Ok(())
-}

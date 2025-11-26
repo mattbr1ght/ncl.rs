@@ -1,8 +1,8 @@
 services:
     react-native-server:
         build:
-            context: './'
-            dockerfile: Dockerfile
+            context: .
+            dockerfile: ./docker/Dockerfile
         # Coolify-managed container: expose port 80 only (no published ports)
         expose:
             - '80'

@@ -2,7 +2,7 @@ services:
     laravel.test:
         build:
             context: .
-            dockerfile: ./docker/sail/Dockerfile
+            dockerfile: ./docker/sail/Docker-coolify
             args:
                 WWWGROUP: '${WWWGROUP}'
         image: 'sail-8.4/app'
@@ -13,12 +13,11 @@ services:
             - '80'
         environment:
             WWWUSER: '${WWWUSER}'
+            APP_LOCALE: '${APP_LOCALE:-en}'
             LARAVEL_SAIL: 1
             XDEBUG_MODE: '${SAIL_XDEBUG_MODE:-off}'
             XDEBUG_CONFIG: '${SAIL_XDEBUG_CONFIG:-client_host=host.docker.internal}'
             IGNITION_LOCAL_SITES_PATH: '${PWD}'
-        volumes:
-            - '.:/var/www/html'
         networks:
             - sail
         depends_on:

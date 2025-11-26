@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use crate::modules::config::{NclConfig, ProjectConfig};
 use crate::modules::coolify::CoolifyClient;
 use crate::modules::github;
-use crate::modules::keyring::{Keyring, accounts};
 
 /// Removes a project (GitHub repo, Coolify project, keyring entries, config)
 pub fn remove_project(project_path: &PathBuf) -> Result<()> {
@@ -71,17 +70,6 @@ pub fn remove_project(project_path: &PathBuf) -> Result<()> {
         }
     } else {
         coolify_deleted = true; // No project to delete
-    }
-
-    // Clean up keyring entries
-    let project_name = project_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-
-    let project_key = format!("{}_{}", project_name, accounts::COOLIFY_TOKEN);
-    if let Err(e) = Keyring::delete(&project_key) {
-        warn!("Failed to delete keyring entry {}: {}", project_key, e);
     }
 
     // Only delete .ncl/config.toml if both GitHub and Coolify have been successfully removed

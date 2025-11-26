@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use log::{debug, warn};
+use log::debug;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,6 @@ struct CreateProjectResponse {
     id: Option<String>,
     #[serde(rename = "uuid")]
     uuid: Option<String>,
-    message: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -36,11 +35,6 @@ pub struct EnvironmentResponse {
     pub name: Option<String>,
 }
 
-#[derive(Serialize)]
-struct CreateDeploymentRequest {
-    branch: String,
-    environment: String,
-}
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct GitHubApp {
@@ -64,62 +58,6 @@ pub struct Destination {
     pub name: Option<String>,
     #[serde(rename = "destination_type")]
     pub destination_type: Option<String>,
-}
-
-#[derive(Serialize, Debug, Clone)]
-pub struct ApplicationEnvironmentVariable {
-    pub key: String,
-    pub value: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_build_time: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_multiline: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_preview: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_literal: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_shown_once: Option<bool>,
-}
-
-impl ApplicationEnvironmentVariable {
-    pub fn new<K: Into<String>, V: Into<String>>(key: K, value: V) -> Self {
-        Self {
-            key: key.into(),
-            value: value.into(),
-            is_build_time: None,
-            is_multiline: None,
-            is_preview: None,
-            is_literal: None,
-            is_shown_once: None,
-        }
-    }
-}
-
-impl ApplicationEnvironmentVariable {
-    /// Convenience constructor that sets Coolify-friendly defaults
-    /// is_preview: true, is_literal: true, is_multiline: true, is_shown_once: true
-    pub fn with_coolify_defaults<K: Into<String>, V: Into<String>>(key: K, value: V) -> Self {
-        Self {
-            key: key.into(),
-            value: value.into(),
-            is_build_time: None,
-            is_multiline: Some(true),
-            is_preview: Some(true),
-            is_literal: Some(true),
-            is_shown_once: Some(true),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct ApplicationEnvPayload {
-    pub key: String,
-    pub value: String,
-    pub is_preview: bool,
-    pub is_literal: bool,
-    pub is_multiline: bool,
-    pub is_shown_once: bool,
 }
 
 impl CoolifyClient {
@@ -412,7 +350,6 @@ impl CoolifyClient {
         docker_compose_location: &str,
         ports_exposes: &str,
         destination_uuid: Option<&str>,
-        environment_variables: &[ApplicationEnvironmentVariable],
     ) -> Result<String> {
         debug!(
             "Creating GitHub app application '{}' in environment {} for project {}",
@@ -493,56 +430,6 @@ impl CoolifyClient {
 
         debug!("Successfully created GitHub app application: {}", app_uuid);
         Ok(app_uuid)
-    }
-
-    /// Sets environment variables for an application from Coolify's perspective.
-    /// Expects values already normalized to the Coolify payload schema.
-    pub fn set_application_envs(
-        &self,
-        application_uuid: &str,
-        envs: &[ApplicationEnvironmentVariable],
-    ) -> Result<()> {
-        debug!(
-            "Setting {} environment variables for application {}",
-            envs.len(),
-            application_uuid
-        );
-
-        let client = reqwest::blocking::Client::new();
-
-        let payload: Vec<ApplicationEnvPayload> = envs
-            .iter()
-            .map(|e| ApplicationEnvPayload {
-                key: e.key.clone(),
-                value: e.value.clone(),
-                is_preview: e.is_preview.unwrap_or(true),
-                is_literal: e.is_literal.unwrap_or(true),
-                is_multiline: e.is_multiline.unwrap_or(true),
-                is_shown_once: e.is_shown_once.unwrap_or(true),
-            })
-            .collect();
-
-        let response = client
-            .post(&format!(
-                "{}/api/v1/applications/{}/envs",
-                self.api_endpoint, application_uuid
-            ))
-            .header("Authorization", &format!("Bearer {}", self.api_token))
-            .header("Content-Type", "application/json")
-            .json(&payload)
-            .send()
-            .context("Failed to send request to Coolify API for setting envs")?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "Failed to set application environment variables: {}",
-                error_text
-            ));
-        }
-
-        debug!("Successfully updated application environment variables");
-        Ok(())
     }
 
     /// Deletes a Coolify project
