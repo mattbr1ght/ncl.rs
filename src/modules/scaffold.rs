@@ -3,6 +3,7 @@ use log::debug;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::process::exit;
 
 use crate::modules::common::Installable;
 use crate::modules::config::{NclConfig, ProjectConfig};

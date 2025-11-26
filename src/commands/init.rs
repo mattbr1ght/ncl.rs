@@ -5,6 +5,7 @@ use sanitize_filename::{is_sanitized, sanitize};
 
 use crate::modules::check::missing_dependencies;
 use crate::modules::config::NclConfig;
+use crate::modules::permissions::fix_file_ownership;
 use crate::modules::scaffold::ProjectOptions;
 use crate::modules::templates::{Template, load_templates};
 
@@ -117,7 +118,16 @@ pub fn run(skip_github: bool, skip_coolify: bool, skip_trello: bool) -> Result<(
         .initialize_project()
         .context("Failed to initialize project")?;
 
-    let next_steps = format!("cd ./{}\nncl run dev", sanitize(&project_options.name));
+
+    let mut fix_permissions_command = "".to_string();
+    if let Err(e) = fix_file_ownership(&project_options.path) {
+        fix_permissions_command = format!(
+            "sudo chown -R $USER:$USER {}\n",
+            project_options.path.display()
+        )
+    }
+
+    let next_steps = format!("{}cd ./{}\nncl run dev", fix_permissions_command, sanitize(&project_options.name));
     cliclack::note("Next steps.", next_steps)?;
     cliclack::outro("Successfully initialized the project!")?;
 
