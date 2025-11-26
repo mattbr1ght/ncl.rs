@@ -22,8 +22,6 @@ pub struct CommandSpec {
     pub command: String,
     /// Where to execute the command
     pub context: ExecutionContext,
-    /// Working directory (relative to project root)
-    pub working_dir: Option<String>,
 }
 
 /// Execute a single command
@@ -384,8 +382,6 @@ fn execute_docker_command(
     }
 }
 
-
-
 /// Parse a command string into a CommandSpec
 /// Supports syntax:
 /// - "command" - runs on host
@@ -407,7 +403,6 @@ pub fn parse_command(cmd: &str) -> CommandSpec {
         return CommandSpec {
             command: cmd.to_string(),
             context: ExecutionContext::Host,
-            working_dir: None,
         };
     }
 
@@ -419,7 +414,6 @@ pub fn parse_command(cmd: &str) -> CommandSpec {
                     container: target.to_string(),
                     service: Some(target.to_string()),
                 },
-                working_dir: None,
             }
         } else {
             // docker:command - use default container
@@ -429,14 +423,12 @@ pub fn parse_command(cmd: &str) -> CommandSpec {
                     container: "app".to_string(),
                     service: Some("app".to_string()),
                 },
-                working_dir: None,
             }
         }
     } else {
         CommandSpec {
             command: cmd.to_string(),
             context: ExecutionContext::Host,
-            working_dir: None,
         }
     }
 }

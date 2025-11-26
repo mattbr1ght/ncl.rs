@@ -1,7 +1,10 @@
 FROM node:latest
 WORKDIR /usr/src/app
-COPY package.json .
+
+COPY . .
 RUN npm install
-COPY . ./
-EXPOSE 8081
+
+ENV PORT=80
+EXPOSE 80
+
 CMD [ "npm", "start" ] 

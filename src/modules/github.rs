@@ -23,7 +23,6 @@ pub struct CreateRepoRequest {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateRepoResponse {
     pub clone_url: String,
-    pub ssh_url: String,
     pub html_url: String,
 }
 

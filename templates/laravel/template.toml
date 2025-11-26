@@ -4,12 +4,12 @@ version = "1.1.0"
 
 post_install_hook = [
     "docker compose up -d",
-    "docker:laravel.test:composer install",
-    "docker:laravel.test:npm install",
-    "docker:laravel.test:php artisan key:generate",
-    "docker:laravel.test:php artisan storage:link",
-    "docker:laravel.test:npm run build",
-    "docker:laravel.test:php artisan migrate",
+    # "docker:laravel.test:composer install",
+    # "docker:laravel.test:npm install",
+    # "docker:laravel.test:php artisan key:generate",
+    # "docker:laravel.test:php artisan storage:link",
+    # "docker:laravel.test:npm run build",
+    # "docker:laravel.test:php artisan migrate",
     "docker compose down",
 ]
 

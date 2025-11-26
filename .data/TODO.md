@@ -1,5 +1,4 @@
 # Plan pracy 
-
 | Zadanie                                  | Opis                                                                                        | Czas (h) |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------- | -------- |
 | Inicjalizacja projektu CLI               | Utworzenie projektu Cargo i podstawowej struktury katalogów                                 | 1        |

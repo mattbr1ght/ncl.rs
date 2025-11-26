@@ -2,7 +2,7 @@ services:
     next-server:
         build:
             context: './'
-            dockerfile: Dockerfile
+            dockerfile: ./docker/Docker-coolify
         # Coolify-managed container: expose port 80 only (no published ports)
         expose:
             - '80'

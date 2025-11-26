@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -7,7 +6,6 @@ use toml::Value;
 use toml::map::Map;
 
 use crate::modules::common::ncl_config_dir;
-use crate::modules::keyring::{Keyring, accounts};
 
 /// GitHub configuration defaults
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -150,36 +148,12 @@ impl NclConfig {
             return Ok(Some(token));
         }
 
-        if Keyring::is_available() {
-            match Keyring::get(accounts::GITHUB_TOKEN) {
-                Ok(token) => return Ok(token),
-                Err(err) => {
-                    warn!("Failed to read GitHub token from keyring: {}", err);
-                }
-            }
-        }
-
         Ok(None)
     }
 
     /// Set GitHub token in both keyring and config
     pub fn set_github_token(&mut self, token: Option<String>) -> Result<()> {
         self.github.token = token.clone();
-
-        if Keyring::is_available() {
-            match token {
-                Some(ref value) => {
-                    if let Err(err) = Keyring::set(accounts::GITHUB_TOKEN, value) {
-                        warn!("Failed to store GitHub token in keyring: {}", err);
-                    }
-                }
-                None => {
-                    if let Err(err) = Keyring::delete(accounts::GITHUB_TOKEN) {
-                        warn!("Failed to clear GitHub token from keyring: {}", err);
-                    }
-                }
-            }
-        }
 
         self.save()
     }
@@ -190,70 +164,13 @@ impl NclConfig {
             return Ok(Some(token));
         }
 
-        if Keyring::is_available() {
-            match Keyring::get(accounts::COOLIFY_TOKEN) {
-                Ok(token) => return Ok(token),
-                Err(err) => {
-                    warn!("Failed to read Coolify token from keyring: {}", err);
-                }
-            }
-        }
-
         Ok(None)
     }
 
     /// Set Coolify token in keyring
     pub fn set_coolify_token(&mut self, token: Option<String>) -> Result<()> {
         self.coolify.token = token.clone();
-
-        if Keyring::is_available() {
-            match token {
-                Some(ref value) => {
-                    if let Err(err) = Keyring::set(accounts::COOLIFY_TOKEN, value) {
-                        warn!("Failed to store Coolify token in keyring: {}", err);
-                    }
-                }
-                None => {
-                    if let Err(err) = Keyring::delete(accounts::COOLIFY_TOKEN) {
-                        warn!("Failed to clear Coolify token from keyring: {}", err);
-                    }
-                }
-            }
-        }
-
         self.save()
-    }
-
-    /// Get registry credentials from keyring
-    pub fn get_registry_credentials(&self) -> Result<Option<(String, String)>> {
-        let user = Keyring::get(accounts::REGISTRY_USER)?;
-        let token = Keyring::get(accounts::REGISTRY_TOKEN)?;
-
-        match (user, token) {
-            (Some(u), Some(t)) => Ok(Some((u, t))),
-            _ => Ok(None),
-        }
-    }
-
-    /// Set registry credentials in keyring
-    pub fn set_registry_credentials(
-        &mut self,
-        user: Option<String>,
-        token: Option<String>,
-    ) -> Result<()> {
-        if let Some(ref u) = user {
-            Keyring::set(accounts::REGISTRY_USER, u)?;
-        } else {
-            let _ = Keyring::delete(accounts::REGISTRY_USER);
-        }
-
-        if let Some(ref t) = token {
-            Keyring::set(accounts::REGISTRY_TOKEN, t)?;
-        } else {
-            let _ = Keyring::delete(accounts::REGISTRY_TOKEN);
-        }
-
-        Ok(())
     }
 }
 
