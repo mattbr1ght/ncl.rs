@@ -36,11 +36,6 @@ pub struct EnvironmentResponse {
     pub name: Option<String>,
 }
 
-#[derive(Serialize)]
-struct CreateDeploymentRequest {
-    branch: String,
-    environment: String,
-}
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct GitHubApp {
@@ -96,31 +91,7 @@ impl ApplicationEnvironmentVariable {
     }
 }
 
-impl ApplicationEnvironmentVariable {
-    /// Convenience constructor that sets Coolify-friendly defaults
-    /// is_preview: true, is_literal: true, is_multiline: true, is_shown_once: true
-    pub fn with_coolify_defaults<K: Into<String>, V: Into<String>>(key: K, value: V) -> Self {
-        Self {
-            key: key.into(),
-            value: value.into(),
-            is_build_time: None,
-            is_multiline: Some(true),
-            is_preview: Some(true),
-            is_literal: Some(true),
-            is_shown_once: Some(true),
-        }
-    }
-}
 
-#[derive(Serialize)]
-struct ApplicationEnvPayload {
-    pub key: String,
-    pub value: String,
-    pub is_preview: bool,
-    pub is_literal: bool,
-    pub is_multiline: bool,
-    pub is_shown_once: bool,
-}
 
 impl CoolifyClient {
     pub fn new(api_endpoint: String, api_token: String) -> Self {
@@ -509,6 +480,16 @@ impl CoolifyClient {
         );
 
         let client = reqwest::blocking::Client::new();
+
+        #[derive(Serialize)]
+        struct ApplicationEnvPayload {
+            pub key: String,
+            pub value: String,
+            pub is_preview: bool,
+            pub is_literal: bool,
+            pub is_multiline: bool,
+            pub is_shown_once: bool,
+        }
 
         let payload: Vec<ApplicationEnvPayload> = envs
             .iter()

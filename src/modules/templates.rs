@@ -158,17 +158,6 @@ pub fn run_hook(hook: &Hook, project_path: &Path) -> Result<()> {
     execute_commands(hook, project_path, "Running hook")
 }
 
-/// Executes a named hook from a template
-pub fn run_named_hook(template: &Template, hook_name: &str, project_path: &Path) -> Result<()> {
-    let hook = template.hooks.get(hook_name).with_context(|| {
-        format!(
-            "Hook '{}' not found in template '{}'",
-            hook_name, template.name
-        )
-    })?;
-
-    execute_commands(hook, project_path, &format!("Running hook: {}", hook_name))
-}
 
 fn templates_dir() -> PathBuf {
     ncl_config_dir().join("templates")

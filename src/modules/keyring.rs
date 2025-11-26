@@ -94,19 +94,6 @@ impl Keyring {
         }
     }
 
-    /// Check if a secret exists in the keyring
-    pub fn exists(account: &str) -> bool {
-        #[cfg(feature = "keyring-support")]
-        {
-            Self::get(account).is_ok_and(|opt| opt.is_some())
-        }
-
-        #[cfg(not(feature = "keyring-support"))]
-        {
-            let _ = account;
-            false
-        }
-    }
 }
 
 /// Account names for different secrets
